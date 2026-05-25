@@ -3,6 +3,9 @@
 
   const APP_TOKEN = "473zGS4UYYBAd2OR";
   const DEFAULT_SONG_URL = "https://www.youtube.com/watch?v=ygY2qObZv24";
+  const REQUIRES_HTTP = window.location.protocol === "file:";
+  const HTTP_REQUIRED_MESSAGE =
+    "file:// では歌詞取得が CORS で失敗します。localhost などの HTTP サーバーで開いてください";
 
   const $ = (selector) => document.querySelector(selector);
 
@@ -44,6 +47,11 @@
     return;
   }
 
+  if (REQUIRES_HTTP) {
+    setStatus(HTTP_REQUIRED_MESSAGE, "error");
+    addEvent("open via http://localhost to enable lyrics");
+  }
+
   const { Player, Ease } = window.TextAliveApp;
 
   let duration = 0;
@@ -51,7 +59,7 @@
   let isLoadingSong = false;
   let loadSequence = 0;
   let playerGeneration = 0;
-  let queuedSongUrl = DEFAULT_SONG_URL;
+  let queuedSongUrl = REQUIRES_HTTP ? "" : DEFAULT_SONG_URL;
   let lastPhraseText = "";
   let lastWordText = "";
   let lastCharText = "";
@@ -245,6 +253,12 @@
 
     if (!songUrl) {
       setStatus("URL を入力してください", "error");
+      return;
+    }
+
+    if (REQUIRES_HTTP) {
+      setStatus(HTTP_REQUIRED_MESSAGE, "error");
+      addEvent("load blocked on file:// origin");
       return;
     }
 
