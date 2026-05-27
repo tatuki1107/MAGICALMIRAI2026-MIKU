@@ -84,7 +84,7 @@
             title: "アクセント色",
             name: "accentColor",
             className: "Color",
-            initialValue: "#50d4ad",
+            initialValue: "#39c5bb",
           },
         ],
       },
@@ -124,6 +124,7 @@
         }
         setStatus("再生中", "ready");
         addEvent("play");
+        if (window.MusicBG) window.MusicBG.isPlaying = true;
       },
       onPause: () => {
         if (generation !== playerGeneration) {
@@ -131,6 +132,7 @@
         }
         setStatus("一時停止", "ready");
         addEvent("pause");
+        if (window.MusicBG) window.MusicBG.isPlaying = false;
       },
       onStop: () => {
         if (generation !== playerGeneration) {
@@ -139,6 +141,7 @@
         setStatus("停止", "ready");
         addEvent("stop");
         updatePosition(0);
+        if (window.MusicBG) window.MusicBG.isPlaying = false;
       },
       onTimeUpdate: (position) => {
         if (generation === playerGeneration) {
@@ -458,6 +461,10 @@
     elements.beat.textContent = `#${beat.index} ${Math.round(progress * 100)}%`;
     elements.beatBar.style.width = `${Math.ceil(easedProgress * 100)}%`;
     document.documentElement.style.setProperty("--beat-progress", progress.toFixed(3));
+    if (window.MusicBG) {
+      window.MusicBG.beatProgress = progress;
+      window.MusicBG.beatIndex    = beat.index;
+    }
   }
 
   function updateHarmony(position) {
@@ -466,6 +473,7 @@
 
     elements.chord.textContent = chord && chord.name ? chord.name : "-";
     elements.chorus.textContent = chorus ? `${Math.round(chorus.progress(position) * 100)}%` : "-";
+    if (window.MusicBG) window.MusicBG.isChorus = !!chorus;
   }
 
   function resetLyrics() {
