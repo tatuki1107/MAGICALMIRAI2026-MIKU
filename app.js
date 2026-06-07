@@ -2,7 +2,7 @@
   "use strict";
 
   const APP_TOKEN = "473zGS4UYYBAd2OR";
-  const DEFAULT_SONG_URL = "https://www.youtube.com/watch?v=ygY2qObZv24";
+  const DEFAULT_SONG_URL = "https://piapro.jp/t/E2i3/20251215092113";
   const REQUIRES_HTTP = window.location.protocol === "file:";
   const HTTP_REQUIRED_MESSAGE =
     "file:// では歌詞取得が CORS で失敗します。localhost などの HTTP サーバーで開いてください";
@@ -26,9 +26,6 @@
     beatBar: $("#beatBar"),
     events: $("#events"),
     controlPanel: $("#controlPanel"),
-    loadForm: $("#loadForm"),
-    loadSong: $("#loadSong"),
-    songUrl: $("#songUrl"),
     play: $("#play"),
     pause: $("#pause"),
     stop: $("#stop"),
@@ -36,10 +33,10 @@
     jump: $("#jump"),
     seek: $("#seek"),
     duration: $("#duration"),
+    volume: $("#volume"),
+    volumeVal: $("#volumeVal"),
     media: $("#media"),
   };
-
-  elements.songUrl.value = DEFAULT_SONG_URL;
 
   if (!window.TextAliveApp) {
     setStatus("TextAlive App API を読み込めませんでした", "error");
@@ -158,9 +155,10 @@
     return nextPlayer;
   }
 
-  elements.loadForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    loadSong(elements.songUrl.value.trim(), { replaceBusy: true });
+  elements.volume.addEventListener("input", () => {
+    const v = Number(elements.volume.value);
+    elements.volumeVal.textContent = v;
+    if (player) player.requestVolume(v);
   });
 
   elements.play.addEventListener("click", () => {
@@ -218,7 +216,6 @@
 
     elements.controlPanel.classList.toggle("is-managed", app.managed);
     if (app.songUrl) {
-      elements.songUrl.value = app.songUrl;
       queuedSongUrl = "";
     }
 
@@ -231,7 +228,6 @@
 
   function onAppMediaChange(mediaUrl) {
     if (mediaUrl) {
-      elements.songUrl.value = mediaUrl;
       addEvent("media changed");
       resetLyrics();
       disableTransport(true);
@@ -265,11 +261,6 @@
       return;
     }
 
-    if (normalizedSongUrl !== songUrl) {
-      elements.songUrl.value = normalizedSongUrl;
-      addEvent("url normalized");
-    }
-
     if (isLoadingSong || player.isLoading) {
       if (options.replaceBusy) {
         replacePlayerAndLoad(normalizedSongUrl);
@@ -284,7 +275,6 @@
     isLoadingSong = true;
     loadSequence += 1;
     const sequence = loadSequence;
-    elements.loadSong.disabled = true;
     setStatus("楽曲情報を読み込み中");
     addEvent("loading song");
     disableTransport(true);
@@ -298,7 +288,6 @@
         }
 
         isLoadingSong = false;
-        elements.loadSong.disabled = false;
         disableTransport(false);
 
         const message = error && error.message ? error.message : String(error);
@@ -308,7 +297,6 @@
       .finally(() => {
         if (sequence === loadSequence && isLoadingSong && !player.isLoading) {
           isLoadingSong = false;
-          elements.loadSong.disabled = false;
         }
       });
   }
@@ -384,13 +372,13 @@
 
     disableTransport(false);
     isLoadingSong = false;
-    elements.loadSong.disabled = false;
     setStatus("動画データ準備完了", "ready");
     addEvent("video ready");
   }
 
   function onTimerReady() {
     disableTransport(false);
+    player.requestVolume(Number(elements.volume.value));
     setStatus("再生準備完了", "ready");
     addEvent("timer ready");
   }
@@ -411,21 +399,40 @@
 
     if (unit.text !== lastPhraseText) {
       lastPhraseText = unit.text;
-      elements.phrase.textContent = unit.text || "-";
+      if (window.Lyrics3D) {
+        window.Lyrics3D.onPhrase(unit, now);
+      }
     }
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function renderPhraseChars(text) {
+    if (!text || text === "-" || text === "歌詞なし" || text === "歌詞を読み込み中") {
+      elements.phrase.textContent = text;
+      return;
+    }
+    const chars = [...text];
+    elements.phrase.innerHTML = chars
+      .map((ch, i) =>
+        `<span class="pv-char" style="--ci:${i};--cn:${chars.length}">${ch === " " ? "&nbsp;" : escapeHtml(ch)}</span>`,
+      )
+      .join("");
   }
 
   function animateWord(now, unit) {
     if (unit.contains(now) && unit.text !== lastWordText) {
       lastWordText = unit.text;
-      elements.word.textContent = unit.text || "-";
+      if (elements.word) elements.word.textContent = unit.text || "-";
     }
   }
 
   function animateChar(now, unit) {
     if (unit.contains(now) && unit.text !== lastCharText) {
       lastCharText = unit.text;
-      elements.char.textContent = unit.text || "-";
+      if (elements.char) elements.char.textContent = unit.text || "-";
     }
   }
 
@@ -482,8 +489,8 @@
     lastWordText = "";
     lastCharText = "";
     elements.phrase.textContent = "歌詞を読み込み中";
-    elements.word.textContent = "-";
-    elements.char.textContent = "-";
+    if (elements.word) elements.word.textContent = "-";
+    if (elements.char) elements.char.textContent = "-";
     elements.songTitle.textContent = "-";
     elements.artistName.textContent = "-";
     elements.phraseCount.textContent = "phrases -";

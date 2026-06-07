@@ -48,6 +48,24 @@ input {
   z-index: 0;
 }
 
+#dancer-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+#lyrics3d-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3;
+}
+
 /* ── Top HUD ───────────────────────────────────────────────── */
 .stage-hud {
   position: absolute;
@@ -123,13 +141,13 @@ input {
   color: #ff5555;
 }
 
-/* ── Lyrics center stage ───────────────────────────────────── */
+/* ── Lyrics center stage (3D歌詞に移行のため非表示) ────────── */
 .lyrics-stage {
+  display: none; /* 3D canvas (lyrics3d-canvas) に移行済み */
   position: absolute;
   inset: 0;
   bottom: 80px;
   z-index: 5;
-  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -160,24 +178,35 @@ input {
     opacity 80ms linear;
 }
 
-.word-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 22px;
-  min-height: 42px;
+/* ── 文字PV: character-by-character animation ──────────────── */
+.pv-char {
+  display: inline-block;
+  animation: pvCharIn 0.32s calc(var(--ci, 0) * 0.045s) cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  will-change: transform, opacity, filter;
 }
 
-.word-row span {
-  padding: 0.3rem 0.85rem;
-  border: 1px solid rgba(57, 197, 187, 0.22);
-  border-radius: 999px;
-  background: rgba(57, 197, 187, 0.07);
-  color: rgba(255, 255, 255, 0.65);
-  font-size: clamp(0.85rem, 1.8vw, 1.25rem);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+@keyframes pvCharIn {
+  0% {
+    opacity: 0;
+    transform: translateY(0.45em) scale(0.15) rotateZ(-22deg);
+    filter: blur(10px);
+    color: var(--accent);
+    text-shadow:
+      0 0 24px rgba(57, 197, 187, 1),
+      0 0 60px rgba(57, 197, 187, 0.8);
+  }
+  60% {
+    filter: blur(1px);
+    color: #fff;
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    color: #fff;
+  }
 }
+
 
 /* ── Beat meter ────────────────────────────────────────────── */
 .beat-meter {
@@ -220,51 +249,21 @@ input {
   max-width: 1280px;
   margin: 0 auto;
   padding: 10px 22px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px 20px;
-  align-items: center;
-}
-
-/* ── Song form ─────────────────────────────────────────────── */
-.song-form {
-  display: grid;
-  grid-template-columns: auto minmax(180px, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: center;
-}
-
-.song-form label {
-  color: var(--accent);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.song-form input {
-  height: 36px;
-  border: 1px solid rgba(57, 197, 187, 0.22);
-  border-radius: 6px;
-  background: rgba(57, 197, 187, 0.05);
-  color: var(--text);
-  padding: 0 0.85rem;
-  outline: none;
-  transition: border-color 150ms, box-shadow 150ms;
-}
-
-.song-form input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(57, 197, 187, 0.14);
-}
-
-.song-form input::placeholder {
-  color: rgba(255, 255, 255, 0.22);
-  font-size: 0.8rem;
+  align-items: stretch;
 }
 
 /* ── Buttons ───────────────────────────────────────────────── */
+.song-form button {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  border-color: rgba(57, 197, 187, 0.45);
+}
+
 button {
   height: 36px;
   padding: 0 0.9rem;
@@ -300,7 +299,7 @@ button:disabled {
 .transport {
   display: flex;
   gap: 6px;
-  justify-content: flex-end;
+  justify-content: center;
 }
 
 .transport button {
@@ -312,7 +311,6 @@ button:disabled {
 
 /* ── Seek row ──────────────────────────────────────────────── */
 .seek-row {
-  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 14px;
@@ -323,6 +321,32 @@ button:disabled {
   width: 100%;
   accent-color: var(--accent);
   height: 4px;
+}
+
+/* ── Volume row ────────────────────────────────────────────── */
+.volume-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.volume-row label {
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.volume-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 4px;
+}
+
+#volumeVal {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.5ch;
+  text-align: right;
 }
 
 .time-display {
@@ -349,7 +373,7 @@ button:disabled {
   min-height: 44px;
   overflow: hidden;
   border-radius: 6px;
-  opacity: 0.1;
+  opacity: 0;
   pointer-events: none;
 }
 
@@ -368,17 +392,8 @@ button:disabled {
   }
 
   .controls-inner {
-    grid-template-columns: 1fr;
     padding: 8px 14px;
-    gap: 8px 12px;
-  }
-
-  .song-form {
-    grid-template-columns: auto 1fr auto;
-  }
-
-  .transport {
-    justify-content: center;
+    gap: 8px;
   }
 
   .transport button {

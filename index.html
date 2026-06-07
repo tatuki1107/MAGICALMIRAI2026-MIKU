@@ -8,10 +8,20 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./style.css" />
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+      }
+    }
+    </script>
   </head>
   <body>
     <div class="concert-wrap">
       <canvas id="bg-canvas" aria-hidden="true"></canvas>
+      <canvas id="dancer-canvas" aria-hidden="true"></canvas>
+      <canvas id="lyrics3d-canvas" aria-hidden="true"></canvas>
 
       <!-- Top HUD: NOW PLAYING + status -->
       <header class="stage-hud">
@@ -28,10 +38,6 @@
       <!-- Lyrics: center stage -->
       <div class="lyrics-stage" aria-label="歌詞表示">
         <div class="phrase" id="phrase">-</div>
-        <div class="word-row">
-          <span id="word">-</span>
-          <span id="char">-</span>
-        </div>
       </div>
 
       <!-- Beat meter above controls -->
@@ -42,12 +48,6 @@
       <!-- Bottom controls overlay -->
       <footer class="controls-overlay" id="controlPanel" aria-label="再生操作">
         <div class="controls-inner">
-          <form id="loadForm" class="song-form">
-            <label for="songUrl">URL</label>
-            <input id="songUrl" name="songUrl" type="url" autocomplete="off" placeholder="YouTube / NicoNico URL" />
-            <button id="loadSong" type="submit">LOAD</button>
-          </form>
-
           <div class="transport">
             <button type="button" id="play"   aria-label="再生"       title="再生"       disabled>▶</button>
             <button type="button" id="pause"  aria-label="一時停止"   title="一時停止"   disabled>Ⅱ</button>
@@ -63,6 +63,12 @@
               <span class="time-sep">/</span>
               <span id="duration">0:00.000</span>
             </span>
+          </div>
+
+          <div class="volume-row">
+            <label for="volume">🔊</label>
+            <input id="volume" type="range" min="0" max="100" value="30" step="1" />
+            <span id="volumeVal">30</span>
           </div>
         </div>
       </footer>
@@ -81,10 +87,15 @@
 
     <div id="media" aria-hidden="true"></div>
 
+    <script>
+      // Initialize shared state before any other script runs
+      window.MusicBG = { beatProgress: 0, beatIndex: -1, isChorus: false, isPlaying: false };
+    </script>
     <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
     <script src="https://unpkg.com/textalive-app-api/dist/index.js"></script>
-    <script src="https://unpkg.com/three@0.165.0/build/three.min.js"></script>
-    <script src="./bg.js"></script>
     <script src="./app.js"></script>
+    <script type="module" src="./bg.js"></script>
+    <script type="module" src="./dancer.js"></script>
+    <script type="module" src="./lyrics3d.js"></script>
   </body>
 </html>

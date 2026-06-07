@@ -1,362 +1,293 @@
-(() => {
-  'use strict';
+/**
+ * bg.js — GRAND BLUE background scene
+ * ES module | Three.js via importmap
+ * Deep blue space: camera tunnel, light streaks, Mt.Fuji, bloom, afterimage
+ */
 
-  window.MusicBG = {
-    beatProgress: 0,
-    beatIndex: -1,
-    isChorus: false,
-    isPlaying: false,
-  };
+import * as THREE from 'three';
+import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { AfterimagePass }  from 'three/addons/postprocessing/AfterimagePass.js';
+import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
 
-  const canvas = document.getElementById('bg-canvas');
-  if (!canvas || !window.THREE) return;
+// Shared state bus (read by dancer.js / lyrics3d.js / app.js)
+window.MusicBG = {
+  beatProgress: 0,
+  beatIndex:    -1,
+  isChorus:     false,
+  isPlaying:    false,
+};
 
-  const THREE = window.THREE;
+const canvas = document.getElementById('bg-canvas');
+if (!canvas) throw new Error('bg-canvas not found');
 
-  // ── Renderer ─────────────────────────────────────────────────
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setClearColor(0x000510);
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+// ── Renderer ─────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping         = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.92;
 
-  const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x000510, 0.011);
+// ── Scene ─────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x050e22);
+scene.fog = new THREE.FogExp2(0x050e22, 0.014);
 
-  // Camera: audience looking toward stage
-  const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 200);
-  camera.position.set(0, 4.5, 36);
+// ── Camera ─────────────────────────────────────────────────────
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 250);
+camera.position.set(0, 0, 10);
+camera.lookAt(0, 0, 0);
 
-  // ── Resize ───────────────────────────────────────────────────
-  function onResize() {
-    const parent = canvas.parentElement || canvas;
-    const w = parent.clientWidth  || 1;
-    const h = parent.clientHeight || 1;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / h;
-    camera.updateProjectionMatrix();
-  }
-  onResize();
-  new ResizeObserver(onResize).observe(canvas.parentElement || canvas);
+// ── Lights ─────────────────────────────────────────────────────
+scene.add(new THREE.AmbientLight(0x0b1535, 4));
 
-  // ── Lights ───────────────────────────────────────────────────
-  scene.add(new THREE.AmbientLight(0x030a1a, 1.8));
+const keyLight = new THREE.DirectionalLight(0x39c5bb, 2.2);
+keyLight.position.set(0, 6, 4);
+scene.add(keyLight);
 
-  const rigLeft  = new THREE.PointLight(0x39c5bb, 0.85, 65);
-  rigLeft.position.set(-16, 22, 0);
-  scene.add(rigLeft);
+const fillLight = new THREE.DirectionalLight(0x1a4fb0, 1.4);
+fillLight.position.set(-4, 2, 6);
+scene.add(fillLight);
 
-  const rigRight = new THREE.PointLight(0x5577ff, 0.85, 65);
-  rigRight.position.set(16, 22, 0);
-  scene.add(rigRight);
+const rimLight = new THREE.DirectionalLight(0xff88cc, 0.8);
+rimLight.position.set(0, 1, -6);
+scene.add(rimLight);
 
-  // Beat flash from front-of-house
-  const flashLight = new THREE.PointLight(0xffffff, 0, 120);
-  flashLight.position.set(0, 14, 20);
-  scene.add(flashLight);
+// Beat flash
+const flashLight = new THREE.PointLight(0xffffff, 0, 60);
+flashLight.position.set(0, 0, 8);
+scene.add(flashLight);
 
-  // Stage edge neon glow lights
-  const edgeGlowL = new THREE.PointLight(0x39c5bb, 1.2, 22);
-  edgeGlowL.position.set(-12, 0.8, 7.5);
-  scene.add(edgeGlowL);
+// ── Mt. Fuji silhouette (far background, 静岡モチーフ) ─────────
+{
+  const shape = new THREE.Shape();
+  shape.moveTo(-18, 0);
+  shape.lineTo(-3, 13);   // left ridge
+  shape.lineTo(0, 14.5);  // peak
+  shape.lineTo(3, 13);    // right ridge
+  shape.lineTo(18, 0);
+  shape.closePath();
 
-  const edgeGlowR = new THREE.PointLight(0x39c5bb, 1.2, 22);
-  edgeGlowR.position.set(12, 0.8, 7.5);
-  scene.add(edgeGlowR);
-
-  // ── Floor ────────────────────────────────────────────────────
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(110, 80),
-    new THREE.MeshPhongMaterial({
-      color: 0x01030c,
-      specular: 0x081530,
-      shininess: 100,
-    }),
+  const fuji = new THREE.Mesh(
+    new THREE.ShapeGeometry(shape),
+    new THREE.MeshBasicMaterial({ color: 0x060f26, transparent: true, opacity: 0.75, depthWrite: false }),
   );
-  floor.rotation.x = -Math.PI / 2;
-  scene.add(floor);
+  fuji.scale.set(2.8, 2.8, 1);
+  fuji.position.set(0, -8, -100);
+  scene.add(fuji);
 
-  const gridHelper = new THREE.GridHelper(85, 24, 0x08163a, 0x060f2c);
-  gridHelper.position.y = 0.01;
-  scene.add(gridHelper);
-
-  // ── Stage platform ────────────────────────────────────────────
-  const stageMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(40, 0.55, 25),
-    new THREE.MeshPhongMaterial({
-      color: 0x030715,
-      specular: 0x0c1e50,
-      shininess: 160,
-    }),
+  // Snow cap
+  const snow = new THREE.Shape();
+  snow.moveTo(-3, 12.2);
+  snow.lineTo(0, 14.5);
+  snow.lineTo(3, 12.2);
+  snow.closePath();
+  const snowMesh = new THREE.Mesh(
+    new THREE.ShapeGeometry(snow),
+    new THREE.MeshBasicMaterial({ color: 0x0d1e3d, transparent: true, opacity: 0.55, depthWrite: false }),
   );
-  stageMesh.position.set(0, 0.275, -3);
-  scene.add(stageMesh);
+  snowMesh.scale.set(2.8, 2.8, 1);
+  snowMesh.position.set(0, -8, -99.5);
+  scene.add(snowMesh);
+}
 
-  // Neon edge strip at front of stage
-  const edgeStripMat = new THREE.MeshBasicMaterial({ color: 0x39c5bb });
-  const edgeStrip = new THREE.Mesh(
-    new THREE.BoxGeometry(40, 0.06, 0.1),
-    edgeStripMat,
-  );
-  edgeStrip.position.set(0, 0.6, 9.5);
-  scene.add(edgeStrip);
-
-  // ── Crowd silhouettes ─────────────────────────────────────────
-  const crowdMat  = new THREE.MeshBasicMaterial({ color: 0x010306, transparent: true, opacity: 0.95 });
-  const bodyGeo   = new THREE.BoxGeometry(1, 1, 0.28);
-  const headGeo   = new THREE.SphereGeometry(0.28, 6, 5);
-
-  for (let row = 0; row < 5; row++) {
-    const zRow  = 14 + row * 4.8;
-    const count = 13 + row * 3;
-    const span  = 26 + row * 7;
-
-    for (let c = 0; c < count; c++) {
-      const bodyH = 1.05 + Math.random() * 0.55;
-      const xPos  = -span / 2 + (c / (count - 1)) * span + (Math.random() - 0.5) * 1.8;
-      const zOff  = zRow + (Math.random() - 0.5) * 1.5;
-
-      const body = new THREE.Mesh(bodyGeo, crowdMat);
-      body.scale.y = bodyH;
-      body.position.set(xPos, bodyH / 2, zOff);
-      scene.add(body);
-
-      const head = new THREE.Mesh(headGeo, crowdMat);
-      head.position.set(xPos, bodyH + 0.28, zOff);
-      scene.add(head);
-    }
+// ── Star field ─────────────────────────────────────────────────
+{
+  const STAR_N = 900;
+  const pos    = new Float32Array(STAR_N * 3);
+  for (let i = 0; i < STAR_N; i++) {
+    pos[i * 3]     = (Math.random() - 0.5) * 130;
+    pos[i * 3 + 1] = (Math.random() - 0.5) * 90;
+    pos[i * 3 + 2] = -Math.random() * 110;
   }
-
-  // ── Spotlight beams (ceiling → floor) ────────────────────────
-  const BEAM_X      = [-22, -11, 0, 11, 22];
-  const COLORS_NORM = [0x39c5bb, 0x4466ff, 0xffd166, 0x4466ff, 0x39c5bb];
-  const COLORS_CHO  = [0xff70cc, 0xff3388, 0xffaa22, 0xff3388, 0xff70cc];
-
-  const beams = BEAM_X.map((x, i) => {
-    const geo = new THREE.CylinderGeometry(0.07, 2.5, 21, 7, 1, true);
-    const mat = new THREE.MeshBasicMaterial({
-      color: COLORS_NORM[i],
-      transparent: true,
-      opacity: 0.11,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(x, 10.5, -4);
-    scene.add(mesh);
-
-    const poolMat = new THREE.MeshBasicMaterial({
-      color: COLORS_NORM[i],
-      transparent: true,
-      opacity: 0.3,
-      depthWrite: false,
-    });
-    const pool = new THREE.Mesh(new THREE.CircleGeometry(2.3, 20), poolMat);
-    pool.rotation.x = -Math.PI / 2;
-    pool.position.set(x, 0.58, -4);
-    scene.add(pool);
-
-    return { mesh, mat, pool, poolMat, phase: (i / BEAM_X.length) * Math.PI * 2, baseX: x };
-  });
-
-  // ── LED backdrop panels ───────────────────────────────────────
-  const PANEL_N   = 11;
-  const PANEL_H   = 9.5;
-  const PANEL_W   = 3.2;
-  const PANEL_GAP = 4.3;
-
-  const panels = Array.from({ length: PANEL_N }, (_, i) => {
-    const mat = new THREE.MeshPhongMaterial({
-      color:    new THREE.Color(0x39c5bb),
-      emissive: new THREE.Color(0x061e16),
-      specular: new THREE.Color(0x55ffcc),
-      shininess: 80,
-    });
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(PANEL_W, PANEL_H, 0.25), mat);
-    mesh.position.set(
-      (i - (PANEL_N - 1) / 2) * PANEL_GAP,
-      PANEL_H / 2,
-      -18,
-    );
-    scene.add(mesh);
-    return { mesh, mat, phase: (i / PANEL_N) * Math.PI * 2, h: 1 };
-  });
-
-  // ── Haze particles ────────────────────────────────────────────
-  const HAZE_N  = 300;
-  const hazePos = new Float32Array(HAZE_N * 3);
-  for (let k = 0; k < HAZE_N; k++) {
-    hazePos[k * 3]     = (Math.random() - 0.5) * 65;
-    hazePos[k * 3 + 1] = Math.random() * 24;
-    hazePos[k * 3 + 2] = Math.random() * 45 - 22;
-  }
-  const hazeGeo = new THREE.BufferGeometry();
-  hazeGeo.setAttribute('position', new THREE.BufferAttribute(hazePos, 3));
-  scene.add(new THREE.Points(hazeGeo, new THREE.PointsMaterial({
-    color: 0x5577aa,
-    size: 0.14,
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(geo, new THREE.PointsMaterial({
+    color: 0x4488bb,
+    size: 0.13,
     sizeAttenuation: true,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.5,
   })));
+}
 
-  // ── Confetti (chorus) ─────────────────────────────────────────
-  const CONF_N  = 380;
-  const confP1  = new Float32Array(CONF_N * 3);
-  const confP2  = new Float32Array(CONF_N * 3);
-  const confVX  = new Float32Array(CONF_N);
-  const confVY  = new Float32Array(CONF_N);
+// ── Light streaks (速度感: 光の筋がカメラ脇を後方へ流れる) ─────
+const STREAK_N  = 72;
+const streakArr = [];
 
-  for (let i = 0; i < CONF_N; i++) {
-    confP1[i * 3]     = (Math.random() - 0.5) * 55;
-    confP1[i * 3 + 1] = -10 - Math.random() * 10;
-    confP1[i * 3 + 2] = (Math.random() - 0.5) * 28 - 5;
-    confP2[i * 3]     = confP1[i * 3];
-    confP2[i * 3 + 1] = confP1[i * 3 + 1] - Math.random() * 4;
-    confP2[i * 3 + 2] = confP1[i * 3 + 2];
-    confVX[i]         = (Math.random() - 0.5) * 0.14;
-    confVY[i]         = 0.06 + Math.random() * 0.11;
-  }
+function makeStreak() {
+  const len = 1.8 + Math.random() * 4.5;
+  const geo = new THREE.BoxGeometry(0.014, 0.014, len);
+  geo.translate(0, 0, -len / 2);  // pivot at front
 
-  const confGeo1 = new THREE.BufferGeometry();
-  confGeo1.setAttribute('position', new THREE.BufferAttribute(confP1, 3));
-  const confMat1 = new THREE.PointsMaterial({
-    color: 0xff88cc,
-    size: 0.2,
-    sizeAttenuation: true,
+  const r = Math.random();
+  const color = r < 0.45 ? 0x39c5bb : r < 0.75 ? 0x4488ff : 0xaaeeff;
+  const mat = new THREE.MeshBasicMaterial({
+    color,
     transparent: true,
-    opacity: 0,
+    opacity: 0.55,
     depthWrite: false,
   });
-  scene.add(new THREE.Points(confGeo1, confMat1));
+  const mesh = new THREE.Mesh(geo, mat);
+  resetStreak(mesh, true);
+  scene.add(mesh);
+  return { mesh, mat, speed: 0.3 + Math.random() * 0.55, len };
+}
 
-  const confGeo2 = new THREE.BufferGeometry();
-  confGeo2.setAttribute('position', new THREE.BufferAttribute(confP2, 3));
-  const confMat2 = new THREE.PointsMaterial({
+function resetStreak(mesh, initial = false) {
+  const r = 6 + Math.random() * 3;
+  const a = Math.random() * Math.PI * 2;
+  mesh.position.set(
+    Math.cos(a) * r,
+    Math.sin(a) * r,
+    initial ? (-Math.random() * 70) : (-70),
+  );
+  mesh.lookAt(mesh.position.x * 0.05, mesh.position.y * 0.05, camera.position.z + 20);
+}
+
+for (let i = 0; i < STREAK_N; i++) streakArr.push(makeStreak());
+
+// ── Concentric ring pulses (ミク周囲の波紋) ────────────────────
+const ringPool = [];
+for (let i = 0; i < 6; i++) {
+  const geo = new THREE.RingGeometry(0.9, 0.96, 52);
+  const mat = new THREE.MeshBasicMaterial({
     color: 0x39c5bb,
-    size: 0.16,
-    sizeAttenuation: true,
     transparent: true,
     opacity: 0,
+    side: THREE.DoubleSide,
     depthWrite: false,
   });
-  scene.add(new THREE.Points(confGeo2, confMat2));
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(0, -2.2, 0);
+  scene.add(mesh);
+  ringPool.push({ mesh, mat, scale: 1, active: false });
+}
+let ringIdx = 0;
 
-  // ── Color palette ─────────────────────────────────────────────
-  const C_N  = new THREE.Color(0x39c5bb);
-  const C_C  = new THREE.Color(0xff70cc);
-  const E_N  = new THREE.Color(0x061e16);
-  const E_C  = new THREE.Color(0x3a0820);
-  const col  = new THREE.Color();
-  const emit = new THREE.Color();
-  const cn   = new THREE.Color();
-  const cc   = new THREE.Color();
+function emitRing(chorus) {
+  const r = ringPool[ringIdx % ringPool.length];
+  r.scale = 0.8;
+  r.mat.opacity = 0.9;
+  r.mat.color.set(chorus > 0.5 ? 0xff70cc : 0x39c5bb);
+  r.active = true;
+  ringIdx++;
+}
 
-  // ── State ─────────────────────────────────────────────────────
-  let prevBeat = -1;
-  let beatPulse = 0;
-  let chorus    = 0;
-  let camBob    = 0;
+// ── EffectComposer ─────────────────────────────────────────────
+let composer;
 
-  // ── Render loop ───────────────────────────────────────────────
-  function animate(ts) {
-    requestAnimationFrame(animate);
-    const t  = ts * 0.001;
-    const mb = window.MusicBG;
+function buildComposer(w, h) {
+  if (composer) {
+    composer.passes.length = 0;
+    composer.dispose?.();
+  }
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
 
-    // Beat detection
-    if (mb.beatIndex !== prevBeat && mb.beatIndex >= 0) {
-      beatPulse = 1;
-      prevBeat  = mb.beatIndex;
-    }
-    beatPulse  = Math.max(0, beatPulse - 0.04);
-    chorus    += ((mb.isChorus ? 1 : 0) - chorus) * 0.03;
+  composer._afterimage = new AfterimagePass(0.88);
+  composer.addPass(composer._afterimage);
 
-    col.lerpColors(C_N, C_C, chorus);
-    emit.lerpColors(E_N, E_C, chorus);
+  composer._bloom = new UnrealBloomPass(
+    new THREE.Vector2(w, h),
+    0.42,   // strength
+    0.38,   // radius
+    0.76,   // threshold
+  );
+  composer.addPass(composer._bloom);
+  composer.addPass(new OutputPass());
+}
 
-    // Dynamic lights
-    flashLight.intensity  = beatPulse * 4.5;
-    flashLight.color.copy(col);
-    rigLeft.color.copy(col);
-    rigRight.color.copy(col);
-    rigLeft.intensity  = 0.5 + beatPulse * 1.6 + chorus * 0.9;
-    rigRight.intensity = 0.5 + beatPulse * 1.6 + chorus * 0.9;
+// ── Resize ─────────────────────────────────────────────────────
+function onResize() {
+  const w = canvas.clientWidth  || 1;
+  const h = canvas.clientHeight || 1;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  buildComposer(w, h);
+}
+onResize();
+new ResizeObserver(onResize).observe(canvas.parentElement || canvas);
 
-    const edgeI = 0.8 + beatPulse * 1.4 + chorus * 0.6;
-    edgeGlowL.intensity = edgeI;
-    edgeGlowR.intensity = edgeI;
-    edgeGlowL.color.copy(col);
-    edgeGlowR.color.copy(col);
-    edgeStripMat.color.copy(col);
+// ── State ──────────────────────────────────────────────────────
+let prevBeat  = -1;
+let beatPulse = 0;
+let chorusAmt = 0;
+let energy    = 0;
+let flashAmt  = 0;
 
-    const playScale = mb.isPlaying ? 1 : 0.28;
+// Reusable color objects (avoid per-frame allocation)
+const C_NORMAL = new THREE.Color(0x39c5bb);
+const C_CHORUS = new THREE.Color(0xff70cc);
+const tmpColor  = new THREE.Color();
 
-    // Spotlight beams: sway + beat pulse
-    beams.forEach((b, i) => {
-      const sway       = Math.sin(t * 0.4 + b.phase) * 0.22;
-      const centerDist = Math.abs(i - 2) / 2;
-      const pulse      = 0.09 + beatPulse * 0.22 * (1 - centerDist * 0.15) + chorus * 0.08;
-      b.mat.opacity     = (pulse + 0.02) * (playScale * 0.65 + 0.35);
-      b.poolMat.opacity = Math.min(0.75, (pulse * 3.0 + beatPulse * 0.3) * (playScale * 0.65 + 0.35));
+// ── Render loop ────────────────────────────────────────────────
+function animate(ts) {
+  requestAnimationFrame(animate);
+  const t  = ts * 0.001;
+  const mb = window.MusicBG;
 
-      cn.set(COLORS_NORM[i]);
-      cc.set(COLORS_CHO[i]);
-      b.mat.color.lerpColors(cn, cc, chorus);
-      b.poolMat.color.lerpColors(cn, cc, chorus);
+  // Beat detection
+  if (mb.beatIndex !== prevBeat && mb.beatIndex >= 0) {
+    beatPulse = 1;
+    prevBeat  = mb.beatIndex;
+    emitRing(chorusAmt);
+  }
+  beatPulse  = Math.max(0, beatPulse - 0.052);
+  chorusAmt += ((mb.isChorus ? 1 : 0) - chorusAmt) * 0.04;
+  energy    += (beatPulse * 0.55 + chorusAmt * 0.45 - energy) * 0.09;
 
-      b.mesh.rotation.z = sway;
-      b.pool.position.x = b.baseX + Math.sin(t * 0.4 + b.phase) * 3.5;
-    });
+  // Chorus flash
+  if (mb.isChorus && beatPulse > 0.88) flashAmt = 1.0;
+  flashAmt = Math.max(0, flashAmt - 0.065);
 
-    // LED backdrop panels: wave + beat
-    panels.forEach((p, i) => {
-      const w1       = Math.sin(t * 1.2 + p.phase) * 0.5 + 0.5;
-      const distNorm = Math.abs(i - (PANEL_N - 1) / 2) / ((PANEL_N - 1) / 2);
-      const bp       = beatPulse * (1 - distNorm * 0.45);
-      const base     = (0.5 + w1 * (1.6 + chorus * 3.0)) * playScale;
-      const target   = base + bp * 3.2;
+  // Lights
+  flashLight.intensity = flashAmt * 5 + beatPulse * 1.5;
+  keyLight.intensity   = 1.8 + chorusAmt * 1.8 + beatPulse * 0.8;
+  tmpColor.lerpColors(C_NORMAL, C_CHORUS, chorusAmt);
+  keyLight.color.copy(tmpColor);
+  rimLight.intensity = 0.6 + chorusAmt * 1.4;
 
-      p.h += (target - p.h) * 0.14;
-      p.mesh.scale.y    = p.h;
-      p.mesh.position.y = p.h * (PANEL_H / 2);
+  // Bloom & afterimage dynamics
+  composer._bloom.strength  = 0.32 + energy * 0.55 + chorusAmt * 0.18;
+  composer._bloom.threshold = Math.max(0.55, 0.82 - chorusAmt * 0.25);
+  composer._afterimage.uniforms['damp'].value = 0.87 + chorusAmt * 0.05;
 
-      p.mat.color.copy(col);
-      p.mat.emissive.copy(emit);
-      p.mat.emissiveIntensity = 0.1 + bp * 0.9 + chorus * 0.35;
-    });
-
-    // Confetti (active during chorus)
-    const confTarget  = mb.isChorus ? (0.52 + beatPulse * 0.3) : 0;
-    confMat1.opacity += (confTarget       - confMat1.opacity) * 0.06;
-    confMat2.opacity += (confTarget * 0.7 - confMat2.opacity) * 0.06;
-
-    if (confMat1.opacity > 0.005) {
-      const a1 = confGeo1.attributes.position.array;
-      const a2 = confGeo2.attributes.position.array;
-      for (let i = 0; i < CONF_N; i++) {
-        a1[i * 3]     += confVX[i];
-        a1[i * 3 + 1] += confVY[i];
-        a2[i * 3]     += confVX[i] * 0.75;
-        a2[i * 3 + 1] += confVY[i] * 1.1;
-        if (a1[i * 3 + 1] > 28) {
-          a1[i * 3]     = (Math.random() - 0.5) * 55;
-          a1[i * 3 + 1] = -10 - Math.random() * 5;
-          a1[i * 3 + 2] = (Math.random() - 0.5) * 28 - 5;
-          a2[i * 3]     = a1[i * 3];
-          a2[i * 3 + 1] = a1[i * 3 + 1] - Math.random() * 3;
-        }
-      }
-      confGeo1.attributes.position.needsUpdate = true;
-      confGeo2.attributes.position.needsUpdate = true;
-    }
-
-    // Camera: gentle audience sway + beat nudge
-    camBob += 0.001;
-    camera.position.x = Math.sin(camBob * 0.42) * 1.6;
-    camera.position.y = 4.5 + Math.sin(camBob * 0.28) * 0.35 + beatPulse * 0.18;
-    camera.lookAt(0, 7, 0);
-
-    renderer.render(scene, camera);
+  // Light streaks
+  const streakSpeed = (0.8 + energy * 5.0) * 0.22;
+  for (const s of streakArr) {
+    s.mesh.position.z += s.speed * streakSpeed * (1 + chorusAmt * 0.8);
+    if (s.mesh.position.z > camera.position.z + 2) resetStreak(s.mesh);
+    s.mesh.scale.z     = 1 + energy * 5;
+    s.mat.opacity      = 0.22 + energy * 0.5 + chorusAmt * 0.15;
   }
 
-  animate(0);
-})();
+  // Ring pulses (expand + fade)
+  for (const r of ringPool) {
+    if (!r.active) continue;
+    r.scale          += 0.04 + energy * 0.02;
+    r.mat.opacity    -= 0.022;
+    r.mesh.scale.setScalar(r.scale);
+    r.mesh.rotation.z += 0.004;
+    if (r.mat.opacity <= 0) { r.active = false; r.mat.opacity = 0; }
+  }
+
+  // Fog / background color: shift hue toward magenta on chorus
+  const bgL = 0.05 + chorusAmt * 0.02;
+  tmpColor.setHSL(0.62 - chorusAmt * 0.08, 0.85, bgL);
+  scene.fog.color.copy(tmpColor);
+  scene.background.copy(tmpColor);
+
+  // Camera: gentle bob + energy-driven FOV expansion
+  camera.position.x = Math.sin(t * 0.31) * 0.35 + beatPulse * 0.06;
+  camera.position.y = Math.sin(t * 0.19) * 0.22 + beatPulse * 0.09;
+  camera.fov        = 60 + energy * 20;
+  camera.updateProjectionMatrix();
+  camera.lookAt(0, 0, -6);
+
+  composer.render();
+}
+
+animate(0);
