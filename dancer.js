@@ -333,11 +333,19 @@ const CUES = [
   // 9: 左サイド 全身 sweep
   { az: -80, el:  5, r: 4.2, lx:  0.0, ly: 1.00, fov: 40, type: 'sweep', sweepDur: 4.0, drift: 35 },
 ];
-const VERSE_SEQ  = [0, 2, 5, 3, 8, 6, 7, 1, 9, 4];
-const CHORUS_SEQ = [1, 3, 5, 7, 2, 9, 4, 8];
+// 通常(Aメロ/Bメロ): sweep 多め、8拍ごと
+const VERSE_SEQ     = [1, 2, 5, 4, 3, 8, 7, 0, 9, 6];
+// サビ: cut 多め、4拍ごと
+const CHORUS_SEQ    = [8, 2, 6, 0, 4, 8, 2, 0, 6, 4];
+// 間奏: sweep のみ、16拍ごと
+const INTERLUDE_SEQ = [3, 9, 7, 5, 1];
+// サビ頭リセット用: 全身引き (CUES[6])
+const CHORUS_RESET_IDX = 6;
 
-let cueSeqIdx    = 0;
-let prevPhraseIdx = -1;
+let cueSeqIdx   = 0;   // 現在のシーケンス内ポジション
+let lastCueIdx  = -1;  // 直前に適用したキューインデックス (重複防止)
+let camBeatBase = -1;  // 前回切り替え時の beatIndex
+let prevIsChorus = false;
 
 // ライブカメラ球座標状態
 let camAz = 0, camEl = 5, camR = 4.8, camLx = 0, camLy = 1.0, camFov = 36;
@@ -346,6 +354,32 @@ let camAz = 0, camEl = 5, camR = 4.8, camLx = 0, camLy = 1.0, camFov = 36;
 // { fromEl, toEl, fromR, toR, fromLx, toLx, fromLy, toLy,
 //   fromFov, toFov, fromAz, toAz, startTime, dur, driftRate }
 let activeSweep = null;
+
+// キューを適用する。forceType で型を上書き可、durMult で sweep 時間を倍率調整
+function applyCue(cue, forceType, durMult) {
+  const type = forceType ?? cue.type;
+  if (type === 'cut') {
+    camAz  = cue.az;
+    camEl  = cue.el;
+    camR   = cue.r;
+    camLx  = cue.lx;
+    camLy  = cue.ly;
+    camFov = cue.fov;
+    activeSweep = null;
+  } else {
+    activeSweep = {
+      fromEl: camEl, toEl: cue.el,
+      fromR:  camR,  toR:  cue.r,
+      fromLx: camLx, toLx: cue.lx,
+      fromLy: camLy, toLy: cue.ly,
+      fromFov: camFov, toFov: cue.fov,
+      fromAz: camAz,  toAz: cue.az,
+      startTime: performance.now(),
+      dur: (cue.sweepDur ?? 3.0) * (durMult ?? 1) * 1000,
+      driftRate: cue.drift ?? 15,
+    };
+  }
+}
 
 (function animate() {
   requestAnimationFrame(animate);
@@ -410,37 +444,35 @@ let activeSweep = null;
   key.intensity = 2.5 + beatPulse * 2.5 + choAmt * 1.5 + wordPulse * 1.2;
   fill.intensity = 1.2 + choAmt * 1.0;
 
-  // ── Camera — カメラキューによる cut / sweep 演出 ──
-  const phraseIdx = mb.phraseIndex || 0;
-  if (phraseIdx !== prevPhraseIdx) {
-    prevPhraseIdx = phraseIdx;
-    cueSeqIdx++;
-    const seq = choAmt > 0.5 ? CHORUS_SEQ : VERSE_SEQ;
-    const cue = CUES[seq[cueSeqIdx % seq.length]];
+  // ── Camera — 拍数ベースの cut / sweep 演出 ──
+  const bi          = mb.beatIndex ?? -1;
+  const isChorus    = mb.isChorus  || false;
+  const isInterlude = !(lyr.active || false);
 
-    if (cue.type === 'cut') {
-      // 瞬間切り替え: 全パラメータをスナップ
-      camAz  = cue.az;
-      camEl  = cue.el;
-      camR   = cue.r;
-      camLx  = cue.lx;
-      camLy  = cue.ly;
-      camFov = cue.fov;
-      activeSweep = null;
-    } else {
-      // sweep: 現在状態からターゲットへ滑らかに移動
-      activeSweep = {
-        fromEl: camEl, toEl: cue.el,
-        fromR:  camR,  toR:  cue.r,
-        fromLx: camLx, toLx: cue.lx,
-        fromLy: camLy, toLy: cue.ly,
-        fromFov: camFov, toFov: cue.fov,
-        fromAz: camAz,   toAz: cue.az,
-        startTime: performance.now(),
-        dur: cue.sweepDur * 1000,
-        driftRate: cue.drift,
-      };
-    }
+  // サビ突入: 全身引きへ即 cut してリセット
+  if (isChorus && !prevIsChorus) {
+    applyCue(CUES[CHORUS_RESET_IDX], 'cut');
+    lastCueIdx  = CHORUS_RESET_IDX;
+    camBeatBase = bi;
+  }
+  prevIsChorus = isChorus;
+
+  // 拍ベース切り替え
+  if (bi >= 0 && camBeatBase < 0) camBeatBase = bi;
+  const beatInterval = isInterlude ? 16 : isChorus ? 4 : 8;
+  if (bi >= 0 && bi - camBeatBase >= beatInterval) {
+    camBeatBase = bi;
+    const seq = isInterlude ? INTERLUDE_SEQ : isChorus ? CHORUS_SEQ : VERSE_SEQ;
+    // 同じショットが連続しないよう最大2ステップ先送り
+    let nextPos = (cueSeqIdx + 1) % seq.length;
+    if (seq[nextPos] === lastCueIdx) nextPos = (nextPos + 1) % seq.length;
+    cueSeqIdx  = nextPos;
+    const nextCueIdx = seq[nextPos];
+    lastCueIdx = nextCueIdx;
+    // セクション別タイプ上書き: サビ→常に cut、間奏→常に sweep(1.8倍尺)
+    const forceType = isChorus ? 'cut' : isInterlude ? 'sweep' : null;
+    const durMult   = isInterlude ? 1.8 : 1;
+    applyCue(CUES[nextCueIdx], forceType, durMult);
   }
 
   if (activeSweep) {
