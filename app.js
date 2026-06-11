@@ -208,6 +208,7 @@
     const mode = app.managed ? "TextAlive ホスト接続" : "スタンドアロン";
     setStatus(mode, "ready");
     addEvent(`app ready: ${mode}`);
+    player.volume = 5;
 
     elements.controlPanel.classList.toggle("is-managed", app.managed);
     if (app.songUrl) {
