@@ -4,19 +4,16 @@
   const APP_TOKEN = "473zGS4UYYBAd2OR";
   const DEFAULT_SONG_URL = "https://piapro.jp/t/E2i3/20251215092113";
   const REQUIRES_HTTP = window.location.protocol === "file:";
-  const HTTP_REQUIRED_MESSAGE =
-    "file:// では歌詞取得が CORS で失敗します。localhost などの HTTP サーバーで開いてください";
+  const HTTP_REQUIRED_MESSAGE = "Open this project through http://localhost so TextAlive can fetch song data.";
 
   const $ = (selector) => document.querySelector(selector);
-
   const elements = {
     status: $("#status"),
     phrase: $("#phrase"),
-    word: $("#word"),
-    char: $("#char"),
     songTitle: $("#songTitle"),
     artistName: $("#artistName"),
     position: $("#position"),
+    duration: $("#duration"),
     beat: $("#beat"),
     chord: $("#chord"),
     chorus: $("#chorus"),
@@ -32,316 +29,181 @@
     rewind: $("#rewind"),
     jump: $("#jump"),
     seek: $("#seek"),
-    duration: $("#duration"),
     media: $("#media"),
   };
 
+  const state = window.MusicBG || (window.MusicBG = {});
+  state.beatProgress = 0;
+  state.beatIndex = -1;
+  state.isChorus = false;
+  state.isPlaying = false;
+  state.phraseIndex = 0;
+  state.phrase = state.phrase || { index: 0, text: "", startTime: -1, endTime: -1, progress: 0 };
+  state.lyric = state.lyric || { active: false, progress: 0, wordStart: -1, charStart: -1, vocal: 0 };
+
   if (!window.TextAliveApp) {
-    setStatus("TextAlive App API を読み込めませんでした", "error");
-    addEvent("API script load failed");
+    setStatus("TextAlive App API could not be loaded.", "error");
     return;
   }
 
-  if (REQUIRES_HTTP) {
-    setStatus(HTTP_REQUIRED_MESSAGE, "error");
-    addEvent("open via http://localhost to enable lyrics");
-  }
-
   const { Player, Ease } = window.TextAliveApp;
-
+  let player = createPlayer();
   let duration = 0;
   let maxVocalAmplitude = 0;
   let isSeeking = false;
-  let isLoadingSong = false;
-  let loadSequence = 0;
-  let playerGeneration = 0;
-  let queuedSongUrl = REQUIRES_HTTP ? "" : DEFAULT_SONG_URL;
-  let lastPhraseText = "";
-  let lastWordText = "";
-  let lastCharText = "";
-  let player = createPlayer();
+  let lastPhraseStartTime = -1;
+  let lastWordStartTime = -1;
+  let lastCharStartTime = -1;
+  let lastPlayRequestAt = -Infinity;
+
+  bindControls();
 
   function createPlayer() {
-    const generation = ++playerGeneration;
     const nextPlayer = new Player({
       app: {
         token: APP_TOKEN,
-        appName: "TAKEOVER Lyric Stage",
+        appName: "TAKEOVER Camera Stage",
         appAuthor: "Takumin",
-        parameters: [
-          {
-            title: "文字サイズ",
-            name: "fontScale",
-            className: "Slider",
-            params: [72, 128],
-            initialValue: 100,
-          },
-          {
-            title: "アクセント色",
-            name: "accentColor",
-            className: "Color",
-            initialValue: "#39c5bb",
-          },
-        ],
       },
       mediaElement: elements.media,
-      throttleInterval: 100,
+      throttleInterval: 80,
     });
 
     nextPlayer.addListener({
-      onAppReady: (app) => {
-        if (generation === playerGeneration) {
-          onAppReady(app);
-        }
-      },
-      onAppMediaChange: (mediaUrl) => {
-        if (generation === playerGeneration) {
-          onAppMediaChange(mediaUrl);
-        }
-      },
-      onAppParameterUpdate: (name, value) => {
-        if (generation === playerGeneration) {
-          onAppParameterUpdate(name, value);
-        }
-      },
-      onVideoReady: (video) => {
-        if (generation === playerGeneration) {
-          onVideoReady(video);
-        }
-      },
-      onTimerReady: () => {
-        if (generation === playerGeneration) {
-          onTimerReady();
-        }
-      },
-      onPlay: () => {
-        if (generation !== playerGeneration) {
-          return;
-        }
-        setStatus("再生中", "ready");
-        addEvent("play");
-        if (window.MusicBG) window.MusicBG.isPlaying = true;
-      },
-      onPause: () => {
-        if (generation !== playerGeneration) {
-          return;
-        }
-        setStatus("一時停止", "ready");
-        addEvent("pause");
-        if (window.MusicBG) window.MusicBG.isPlaying = false;
-        resetLyricState();
-      },
-      onStop: () => {
-        if (generation !== playerGeneration) {
-          return;
-        }
-        setStatus("停止", "ready");
-        addEvent("stop");
-        updatePosition(0);
-        if (window.MusicBG) window.MusicBG.isPlaying = false;
-        resetLyricState();
-      },
-      onTimeUpdate: (position) => {
-        if (generation === playerGeneration) {
-          onTimeUpdate(position);
-        }
-      },
-      onThrottledTimeUpdate: (position) => {
-        if (generation === playerGeneration) {
-          updatePosition(position);
-        }
-      },
+      onAppReady,
+      onAppMediaChange,
+      onVideoReady,
+      onTimerReady,
+      onPlay,
+      onPause,
+      onStop,
+      onTimeUpdate,
+      onThrottledTimeUpdate: updatePosition,
     });
 
     return nextPlayer;
   }
 
-  elements.play.addEventListener("click", () => {
-    if (player.video) {
-      const accepted = player.requestPlay();
-      if (!accepted) {
-        setStatus("音源準備待ち");
+  function bindControls() {
+    elements.play.addEventListener("pointerdown", requestPlayFromGesture);
+    elements.play.addEventListener("click", requestPlayFromGesture);
+
+    elements.pause.addEventListener("click", () => {
+      if (player.video) player.requestPause();
+    });
+
+    elements.stop.addEventListener("click", () => {
+      if (player.video) player.requestStop();
+    });
+
+    elements.rewind.addEventListener("click", () => {
+      if (player.video) player.requestMediaSeek(0);
+    });
+
+    elements.jump.addEventListener("click", () => {
+      const firstPhrase = player.video && player.video.firstPhrase;
+      if (firstPhrase) player.requestMediaSeek(firstPhrase.startTime);
+    });
+
+    elements.seek.addEventListener("input", () => {
+      isSeeking = true;
+      elements.position.textContent = formatTime(Number(elements.seek.value));
+    });
+
+    elements.seek.addEventListener("change", () => {
+      if (player.video) player.requestMediaSeek(Number(elements.seek.value));
+      isSeeking = false;
+    });
+  }
+
+  function requestPlayFromGesture(event) {
+    const now = performance.now();
+    if (now - lastPlayRequestAt < 300) {
+      event?.preventDefault?.();
+      return;
+    }
+
+    lastPlayRequestAt = now;
+    event?.preventDefault?.();
+
+    if (!player.video) return;
+
+    unlockMediaElement();
+    const accepted = player.requestPlay();
+    setStatus(accepted ? "Play requested" : "Waiting for audio permission", accepted ? "ready" : undefined);
+  }
+
+  function unlockMediaElement() {
+    const media = elements.media.querySelector("audio, video");
+    if (!media || !media.paused) return;
+
+    const wasMuted = media.muted;
+    media.muted = true;
+
+    try {
+      const playPromise = media.play();
+      if (playPromise && typeof playPromise.catch === "function") {
+        playPromise
+          .then(() => {
+            window.setTimeout(() => {
+              media.muted = wasMuted;
+            }, 80);
+          })
+          .catch(() => {
+            media.muted = wasMuted;
+          });
       } else {
-        setStatus("再生要求送信済み", "ready");
+        window.setTimeout(() => {
+          media.muted = wasMuted;
+        }, 80);
       }
+    } catch (_error) {
+      media.muted = wasMuted;
+      // TextAlive will report playback readiness through its own listener.
     }
-  });
-
-  elements.pause.addEventListener("click", () => {
-    if (player.video) {
-      player.requestPause();
-    }
-  });
-
-  elements.stop.addEventListener("click", () => {
-    if (player.video) {
-      player.requestStop();
-    }
-  });
-
-  elements.rewind.addEventListener("click", () => {
-    if (player.video) {
-      player.requestMediaSeek(0);
-    }
-  });
-
-  elements.jump.addEventListener("click", () => {
-    const firstPhrase = player.video && player.video.firstPhrase;
-    if (firstPhrase) {
-      player.requestMediaSeek(firstPhrase.startTime);
-    }
-  });
-
-  elements.seek.addEventListener("input", () => {
-    isSeeking = true;
-    elements.position.textContent = formatTime(Number(elements.seek.value));
-  });
-
-  elements.seek.addEventListener("change", () => {
-    if (player.video) {
-      player.requestMediaSeek(Number(elements.seek.value));
-    }
-    isSeeking = false;
-  });
+  }
 
   function onAppReady(app) {
-    const mode = app.managed ? "TextAlive ホスト接続" : "スタンドアロン";
+    const mode = app.managed ? "Connected to TextAlive host" : "Standalone mode";
     setStatus(mode, "ready");
     addEvent(`app ready: ${mode}`);
-    player.volume = 5;
-
+    player.volume = 8;
     elements.controlPanel.classList.toggle("is-managed", app.managed);
-    if (app.songUrl) {
-      queuedSongUrl = "";
+
+    if (REQUIRES_HTTP) {
+      setStatus(HTTP_REQUIRED_MESSAGE, "error");
+      addEvent("file origin blocked");
+      return;
     }
 
-    if (!app.songUrl && !app.managed && queuedSongUrl) {
-      const songUrl = queuedSongUrl;
-      queuedSongUrl = "";
-      loadSong(songUrl);
+    if (!app.songUrl && !app.managed) {
+      loadSong(DEFAULT_SONG_URL);
     }
   }
 
   function onAppMediaChange(mediaUrl) {
-    if (mediaUrl) {
-      addEvent("media changed");
-      resetLyrics();
-      disableTransport(true);
-    }
+    if (!mediaUrl) return;
+    addEvent("media changed");
+    resetSongState();
+    disableTransport(true);
   }
 
-  function onAppParameterUpdate(name, value) {
-    if (name === "fontScale") {
-      document.documentElement.style.setProperty("--font-scale", Number(value) / 100);
-    }
-
-    if (name === "accentColor") {
-      const color = typeof value === "string" ? value : `rgb(${value.r}, ${value.g}, ${value.b})`;
-      document.documentElement.style.setProperty("--accent", color);
-    }
-
-    addEvent(`parameter: ${name}`);
-  }
-
-  function loadSong(songUrl, options = {}) {
-    const normalizedSongUrl = normalizeSongUrl(songUrl);
-
+  function loadSong(songUrl) {
     if (!songUrl) {
-      setStatus("URL を入力してください", "error");
+      setStatus("Song URL is missing.", "error");
       return;
     }
 
-    if (REQUIRES_HTTP) {
-      setStatus(HTTP_REQUIRED_MESSAGE, "error");
-      addEvent("load blocked on file:// origin");
-      return;
-    }
-
-    if (isLoadingSong || player.isLoading) {
-      if (options.replaceBusy) {
-        replacePlayerAndLoad(normalizedSongUrl);
-        return;
-      }
-
-      setStatus("読み込み処理中");
-      addEvent("load skipped: busy");
-      return;
-    }
-
-    isLoadingSong = true;
-    loadSequence += 1;
-    const sequence = loadSequence;
-    setStatus("楽曲情報を読み込み中");
-    addEvent("loading song");
+    setStatus("Loading TextAlive song data");
     disableTransport(true);
-    resetLyrics();
+    resetSongState();
 
-    player
-      .createFromSongUrl(normalizedSongUrl)
-      .catch((error) => {
-        if (sequence !== loadSequence) {
-          return;
-        }
-
-        isLoadingSong = false;
-        disableTransport(false);
-
-        const message = error && error.message ? error.message : String(error);
-        setStatus("読み込みに失敗しました", "error");
-        addEvent(message);
-      })
-      .finally(() => {
-        if (sequence === loadSequence && isLoadingSong && !player.isLoading) {
-          isLoadingSong = false;
-        }
-      });
-  }
-
-  function replacePlayerAndLoad(songUrl) {
-    queuedSongUrl = songUrl;
-    loadSequence += 1;
-    isLoadingSong = false;
-    setStatus("楽曲を切り替え中");
-    addEvent("switch song");
-    disableTransport(true);
-    resetLyrics();
-
-    const previousPlayer = player;
-    playerGeneration += 1;
-    safe(() => previousPlayer.requestStop());
-    safe(() => previousPlayer.dispose());
-    elements.media.replaceChildren();
-    player = createPlayer();
-  }
-
-  function normalizeSongUrl(songUrl) {
-    try {
-      const url = new URL(songUrl);
-
-      if (url.hostname === "youtu.be") {
-        const videoId = url.pathname.replace(/^\/+/, "").split("/")[0];
-        return videoId ? `https://www.youtube.com/watch?v=${videoId}` : songUrl;
-      }
-
-      if (url.hostname === "www.youtube.com" || url.hostname === "youtube.com") {
-        const videoId = url.searchParams.get("v");
-        return videoId ? `https://www.youtube.com/watch?v=${videoId}` : songUrl;
-      }
-
-      if (url.hostname === "nico.ms") {
-        const videoId = url.pathname.replace(/^\/+/, "").split("/")[0];
-        return videoId ? `https://www.nicovideo.jp/watch/${videoId}` : songUrl;
-      }
-
-      if (url.hostname === "www.nicovideo.jp" || url.hostname === "nicovideo.jp") {
-        const videoId = url.pathname.match(/\/watch\/([^/?#]+)/);
-        return videoId ? `https://www.nicovideo.jp/watch/${videoId[1]}` : songUrl;
-      }
-
-      return songUrl;
-    } catch (_error) {
-      return songUrl;
-    }
+    player.createFromSongUrl(songUrl).catch((error) => {
+      const message = error && error.message ? error.message : String(error);
+      setStatus("Song data load failed", "error");
+      addEvent(message);
+      disableTransport(false);
+    });
   }
 
   function onVideoReady(video) {
@@ -360,25 +222,42 @@
     maxVocalAmplitude = safe(() => player.getMaxVocalAmplitude()) || 0;
 
     const song = player.data && player.data.song;
-    elements.songTitle.textContent = song && song.name ? song.name : "-";
-    elements.artistName.textContent =
-      song && song.artist && song.artist.name ? song.artist.name : "-";
+    elements.songTitle.textContent = song && song.name ? song.name : "TAKEOVER";
+    elements.artistName.textContent = song && song.artist && song.artist.name ? song.artist.name : "Twinfield";
 
     if (!video.firstPhrase) {
-      elements.phrase.textContent = "歌詞なし";
+      elements.phrase.textContent = "No lyrics";
     }
 
     disableTransport(false);
-    isLoadingSong = false;
-    setStatus("動画データ準備完了", "ready");
+    setStatus("Song ready", "ready");
     addEvent("video ready");
   }
 
   function onTimerReady() {
     disableTransport(false);
-    player.requestVolume(8);
-    setStatus("再生準備完了", "ready");
+    setStatus("Playback ready", "ready");
     addEvent("timer ready");
+  }
+
+  function onPlay() {
+    state.isPlaying = true;
+    setStatus("Playing", "ready");
+    addEvent("play");
+  }
+
+  function onPause() {
+    state.isPlaying = false;
+    setStatus("Paused", "ready");
+    addEvent("pause");
+  }
+
+  function onStop() {
+    state.isPlaying = false;
+    setStatus("Stopped", "ready");
+    addEvent("stop");
+    updatePosition(0);
+    resetLiveState();
   }
 
   function onTimeUpdate(position) {
@@ -388,13 +267,9 @@
     updateLyricState(position);
   }
 
-  // 歌詞の発声状態を MusicBG バスへ公開 (dancer.js が動きの生成に使う)
   function updateLyricState(position) {
-    const mb = window.MusicBG;
-    if (!mb) return;
-    const lyric = mb.lyric || (mb.lyric = {});
     const video = player.video;
-
+    const lyric = state.lyric;
     const phrase = video ? safe(() => video.findPhrase(position)) : null;
     const word = video ? safe(() => video.findWord(position)) : null;
     const char = video ? safe(() => video.findChar(position)) : null;
@@ -408,66 +283,52 @@
       const amp = safe(() => player.getVocalAmplitude(position));
       lyric.vocal = clamp01((amp || 0) / maxVocalAmplitude);
     } else {
-      lyric.vocal = lyric.active ? 0.6 : 0;
+      lyric.vocal = lyric.active ? 0.55 : 0;
     }
-  }
 
-  function resetLyricState() {
-    const lyric = window.MusicBG && window.MusicBG.lyric;
-    if (!lyric) return;
-    lyric.active = false;
-    lyric.progress = 0;
-    lyric.wordStart = -1;
-    lyric.charStart = -1;
-    lyric.vocal = 0;
+    if (phrase) {
+      state.phrase.progress = lyric.progress;
+      document.documentElement.style.setProperty("--phrase-progress", lyric.progress.toFixed(3));
+      registerPhrase(phrase, position);
+    } else {
+      state.phrase.progress = 0;
+      document.documentElement.style.setProperty("--phrase-progress", "0");
+    }
   }
 
   function animatePhrase(now, unit) {
-    if (!unit.contains(now)) {
-      return;
-    }
-
+    if (!unit.contains(now)) return;
     const progress = clamp01(unit.progress(now));
+    state.phrase.progress = progress;
     document.documentElement.style.setProperty("--phrase-progress", progress.toFixed(3));
-
-    if (unit.text !== lastPhraseText) {
-      lastPhraseText = unit.text;
-      if (window.MusicBG) window.MusicBG.phraseIndex = (window.MusicBG.phraseIndex || 0) + 1;
-      if (window.Lyrics3D) {
-        window.Lyrics3D.onPhrase(unit, now);
-      }
-    }
-  }
-
-  function escapeHtml(str) {
-    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-
-  function renderPhraseChars(text) {
-    if (!text || text === "-" || text === "歌詞なし" || text === "歌詞を読み込み中") {
-      elements.phrase.textContent = text;
-      return;
-    }
-    const chars = [...text];
-    elements.phrase.innerHTML = chars
-      .map((ch, i) =>
-        `<span class="pv-char" style="--ci:${i};--cn:${chars.length}">${ch === " " ? "&nbsp;" : escapeHtml(ch)}</span>`,
-      )
-      .join("");
+    registerPhrase(unit, now);
   }
 
   function animateWord(now, unit) {
-    if (unit.contains(now) && unit.text !== lastWordText) {
-      lastWordText = unit.text;
-      if (elements.word) elements.word.textContent = unit.text || "-";
-    }
+    if (!unit.contains(now) || unit.startTime === lastWordStartTime) return;
+    lastWordStartTime = unit.startTime;
   }
 
   function animateChar(now, unit) {
-    if (unit.contains(now) && unit.text !== lastCharText) {
-      lastCharText = unit.text;
-      if (elements.char) elements.char.textContent = unit.text || "-";
-    }
+    if (!unit.contains(now) || unit.startTime === lastCharStartTime) return;
+    lastCharStartTime = unit.startTime;
+  }
+
+  function registerPhrase(unit, now) {
+    if (!unit || unit.startTime === lastPhraseStartTime) return;
+
+    lastPhraseStartTime = unit.startTime;
+    state.phraseIndex = (state.phraseIndex || 0) + 1;
+    state.phrase = {
+      index: state.phraseIndex,
+      text: unit.text || "",
+      startTime: unit.startTime,
+      endTime: unit.endTime,
+      progress: clamp01(unit.progress(now)),
+    };
+
+    elements.phrase.textContent = unit.text || "-";
+    window.ModelStage?.onPhrase?.(state.phrase, now);
   }
 
   function assignAnimation(unit, handler) {
@@ -481,7 +342,6 @@
   function updatePosition(position) {
     const safePosition = Math.max(0, Number(position) || 0);
     elements.position.textContent = formatTime(safePosition);
-
     if (!isSeeking) {
       elements.seek.value = String(Math.min(duration, safePosition));
     }
@@ -489,8 +349,9 @@
 
   function updateBeat(position) {
     const beat = safe(() => player.findBeat(position));
-
     if (!beat) {
+      state.beatIndex = -1;
+      state.beatProgress = 0;
       elements.beat.textContent = "-";
       elements.beatBar.style.width = "0%";
       document.documentElement.style.setProperty("--beat-progress", "0");
@@ -499,36 +360,30 @@
 
     const progress = clamp01(beat.progress(position));
     const easedProgress = Ease ? Ease.circIn(progress) : progress;
+    state.beatIndex = beat.index;
+    state.beatProgress = progress;
     elements.beat.textContent = `#${beat.index} ${Math.round(progress * 100)}%`;
     elements.beatBar.style.width = `${Math.ceil(easedProgress * 100)}%`;
     document.documentElement.style.setProperty("--beat-progress", progress.toFixed(3));
-    if (window.MusicBG) {
-      window.MusicBG.beatProgress = progress;
-      window.MusicBG.beatIndex    = beat.index;
-    }
   }
 
   function updateHarmony(position) {
     const chord = safe(() => player.findChord(position));
     const chorus = safe(() => player.findChorus(position));
-
+    state.isChorus = !!chorus;
     elements.chord.textContent = chord && chord.name ? chord.name : "-";
     elements.chorus.textContent = chorus ? `${Math.round(chorus.progress(position) * 100)}%` : "-";
-    if (window.MusicBG) window.MusicBG.isChorus = !!chorus;
   }
 
-  function resetLyrics() {
+  function resetSongState() {
     duration = 0;
     maxVocalAmplitude = 0;
-    resetLyricState();
-    lastPhraseText = "";
-    lastWordText = "";
-    lastCharText = "";
-    elements.phrase.textContent = "歌詞を読み込み中";
-    if (elements.word) elements.word.textContent = "-";
-    if (elements.char) elements.char.textContent = "-";
-    elements.songTitle.textContent = "-";
-    elements.artistName.textContent = "-";
+    lastPhraseStartTime = -1;
+    lastWordStartTime = -1;
+    lastCharStartTime = -1;
+    elements.phrase.textContent = "-";
+    elements.songTitle.textContent = "TAKEOVER";
+    elements.artistName.textContent = "Twinfield";
     elements.phraseCount.textContent = "phrases -";
     elements.wordCount.textContent = "words -";
     elements.charCount.textContent = "chars -";
@@ -538,6 +393,21 @@
     elements.beatBar.style.width = "0%";
     document.documentElement.style.setProperty("--beat-progress", "0");
     document.documentElement.style.setProperty("--phrase-progress", "0");
+    resetLiveState();
+  }
+
+  function resetLiveState() {
+    state.beatProgress = 0;
+    state.beatIndex = -1;
+    state.isChorus = false;
+    state.phraseIndex = 0;
+    state.phrase = { index: 0, text: "", startTime: -1, endTime: -1, progress: 0 };
+    state.lyric.active = false;
+    state.lyric.progress = 0;
+    state.lyric.wordStart = -1;
+    state.lyric.charStart = -1;
+    state.lyric.vocal = 0;
+    window.ModelStage?.reset?.();
   }
 
   function disableTransport(disabled) {
@@ -554,11 +424,11 @@
   }
 
   function addEvent(message) {
+    if (!elements.events) return;
     const item = document.createElement("li");
     item.textContent = `${new Date().toLocaleTimeString("ja-JP")} ${message}`;
     elements.events.prepend(item);
-
-    while (elements.events.children.length > 8) {
+    while (elements.events.children.length > 10) {
       elements.events.removeChild(elements.events.lastElementChild);
     }
   }
@@ -568,7 +438,6 @@
     const minutes = Math.floor(totalMilliseconds / 60000);
     const seconds = Math.floor((totalMilliseconds % 60000) / 1000);
     const milliseconds = totalMilliseconds % 1000;
-
     return `${minutes}:${String(seconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
   }
 
