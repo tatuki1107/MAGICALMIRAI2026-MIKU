@@ -96,17 +96,23 @@ const P = {
       s.dir   = s.params.dir ?? 1;
       s.baseY = s.params.y   ?? 0;
       s.mesh.position.set(s.dir * 12, s.baseY, s.params.z ?? -1);
+      s.mesh.rotation.z = s.dir * 0.1;
     },
     in(s, t) {
-      s.mesh.position.x       = s.dir * 12 * (1 - easeOut4(t));
+      const e = easeOut4(t);
+      s.mesh.position.x       = s.dir * 12 * (1 - e);
       s.mesh.material.opacity = clamp(t * 3.5, 0, 1);
+      // スライドイン中は傾け、止まる瞬間に水平へ戻す
+      s.mesh.rotation.z       = s.dir * 0.1 * (1 - e);
     },
     active(s, _t, mb) {
+      s.mesh.rotation.z       = 0;
       s.mesh.position.x      -= s.dir * 0.022 * 60;
       s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.09);
     },
     out(s, t) {
-      s.mesh.position.x      -= s.dir * 0.022 * 60 * 2;
+      // 逆側へ加速して画面外へ抜ける
+      s.mesh.position.x      += s.dir * 0.022 * 60 * (2 + t * 4);
       s.mesh.material.opacity = clamp(1 - t * 2.5, 0, 1);
     },
   },
