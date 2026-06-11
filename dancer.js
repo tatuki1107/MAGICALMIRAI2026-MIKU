@@ -172,11 +172,13 @@ const POSES = [
 ];
 
 const _kp = {
-  cur:        0,
-  prev:       0,
-  beatBase:   -1,
-  transStart: 0,
-  transDur:   220, // ms — 素早く移行してピタッと止める
+  cur:          0,
+  prev:         0,
+  beatBase:     -1,
+  transStart:   0,
+  transDur:     220, // ms — 素早く移行してピタッと止める
+  prevProgress: 1,   // フレーズ頭検知用
+  holdUntil:    0,   // 声量ホールド終了時刻 (performance.now ms)
 };
 
 /**
@@ -200,12 +202,30 @@ function tickProcedural(fig, t, beat, cho, L) {
   const amp = isInterlude ? 0 : isChorus ? 1.0 : 0.6;
 
   if (!isInterlude) {
-    if (_kp.beatBase < 0) _kp.beatBase = bi;
-    if (bi - _kp.beatBase >= beatInterval) {
+    const now = performance.now();
+    const prog = L.progress ?? 1;
+
+    // 声量が 0.8 超えた瞬間: 0.3秒ホールド
+    if (L.vocal > 0.8 && _kp.holdUntil < now) {
+      _kp.holdUntil = now + 300;
+    }
+
+    // フレーズ頭(progress が前フレームより大きく巻き戻った): 次ポーズへ即切り替え
+    if (_kp.prevProgress > 0.15 && prog < 0.05 && now >= _kp.holdUntil) {
       _kp.prev       = _kp.cur;
       _kp.cur        = (_kp.cur + 1) % POSES.length;
       _kp.beatBase   = bi;
-      _kp.transStart = performance.now();
+      _kp.transStart = now;
+    }
+    _kp.prevProgress = prog;
+
+    // ビート定期切り替え (ホールド中はスキップ)
+    if (_kp.beatBase < 0) _kp.beatBase = bi;
+    if (bi - _kp.beatBase >= beatInterval && now >= _kp.holdUntil) {
+      _kp.prev       = _kp.cur;
+      _kp.cur        = (_kp.cur + 1) % POSES.length;
+      _kp.beatBase   = bi;
+      _kp.transStart = now;
     }
   }
 
