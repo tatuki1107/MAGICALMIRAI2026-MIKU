@@ -306,6 +306,27 @@ const P = {
       s.mesh.material.opacity = 1 - easeOut2(t);
     },
   },
+  /** SPIN: SpinIn — z軸1回転しながらフェードイン、正位置で止まる */
+  SPIN: {
+    init(s) {
+      s.baseY = s.params.y ?? 0;
+      s.mesh.position.set(0, s.baseY, s.params.z ?? 0);
+      s.mesh.rotation.z = Math.PI * 2;
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      const e = easeOut4(t);
+      s.mesh.rotation.z       = Math.PI * 2 * (1 - e);
+      s.mesh.material.opacity = clamp(t * 3, 0, 1);
+    },
+    active(s, _t, mb) {
+      s.mesh.rotation.z       = 0;
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.09);
+    },
+    out(s, t) {
+      s.mesh.material.opacity = clamp(1 - t * 2.5, 0, 1);
+    },
+  },
 };
 
 // Exit patterns
@@ -338,14 +359,20 @@ let   _yIdx    = 0;
 let   _verseIdx = 0;
 let   _chorIdx  = 0;
 
-// Verse patterns: 6種類をローテーション
+// Verse patterns: A2 と SPIN を交互に挟みながら7種類をローテーション
 const VERSE_CFGS = [
-  (dir, y) => ({ pat: 'A2',  exit: 'B1', meshH: 1.5, glow: '#39c5bb', params: { dir, y } }),
-  (_,   y) => ({ pat: 'A9',  exit: 'B2', meshH: 1.5, glow: '#4488ff', params: { y } }),
-  (_,   y) => ({ pat: 'A8',  exit: 'B6', meshH: 1.6, glow: '#aaeeff', params: { y } }),
-  (_,   y) => ({ pat: 'A10', exit: 'B3', meshH: 1.5, glow: '#39c5bb', params: { y } }),
-  (_,   y) => ({ pat: 'A7',  exit: 'B2', meshH: 1.5, glow: '#88ffee', params: { y } }),
-  (_,   y) => ({ pat: 'A5',  exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (dir, y) => ({ pat: 'A2',   exit: 'B1', meshH: 1.5, glow: '#39c5bb', params: { dir, y } }),
+  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (_,   y) => ({ pat: 'A9',   exit: 'B2', meshH: 1.5, glow: '#4488ff', params: { y } }),
+  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#aaeeff', params: { y } }),
+  (_,   y) => ({ pat: 'A8',   exit: 'B6', meshH: 1.6, glow: '#aaeeff', params: { y } }),
+  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (_,   y) => ({ pat: 'A10',  exit: 'B3', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#88ffee', params: { y } }),
+  (_,   y) => ({ pat: 'A7',   exit: 'B2', meshH: 1.5, glow: '#88ffee', params: { y } }),
+  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (_,   y) => ({ pat: 'A5',   exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#4488ff', params: { y } }),
 ];
 
 // Chorus patterns: 4種類をローテーション
