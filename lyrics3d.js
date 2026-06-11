@@ -257,6 +257,27 @@ const P = {
     },
   },
 
+  /** EMPH: EmphasisWord — サビ最長単語を中央で2倍サイズ強調 */
+  EMPH: {
+    init(s) {
+      s.mesh.position.set(0, 0, 0.5);
+      s.mesh.scale.setScalar(0.05);
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      s.mesh.scale.setScalar(spring(clamp(t * 2, 0, 1)));
+      s.mesh.material.opacity = clamp(t * 5, 0, 1);
+    },
+    active(s, _t, mb) {
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.13);
+      s.mesh.material.opacity = 1;
+    },
+    out(s, t) {
+      s.mesh.scale.setScalar(1 + t * 0.6);
+      s.mesh.material.opacity = 1 - easeOut4(t);
+    },
+  },
+
   /** A10: TwistIn — 薄い板から展開する */
   A10: {
     init(s) {
@@ -290,6 +311,19 @@ const EXIT = {
   B6: (s, t) => { s.mesh.material.opacity = 1 - t; },
 };
 
+// ── Emphasis word detection ───────────────────────────────────
+function findLongestWord(unit) {
+  const words = unit.words
+    ?? (unit.children ?? []).filter(c => c.text && /\S/.test(c.text));
+  if (!words || words.length === 0) return null;
+  let best = null, bestDur = 0;
+  for (const w of words) {
+    const dur = (w.endTime ?? 0) - (w.startTime ?? 0);
+    if (dur > bestDur) { bestDur = dur; best = w; }
+  }
+  return best && bestDur > 0 ? best : null;
+}
+
 // ── Section → Config resolver ────────────────────────────────
 let _dirToggle = 1;
 const _ySlots  = [-1.2, 0, 1.2, -0.6, 0.6];
@@ -315,11 +349,15 @@ const CHORUS_CFGS = [
   () => ({ pat: 'A10', exit: 'B3', meshH: 2.0, glow: '#ff88cc', params: { y: 0 } }),
 ];
 
-function resolveConfig(mb, songTime) {
+function resolveConfig(mb, songTime, unit) {
   if (songTime < 12000) {                              // イントロ
     return { pat: 'A5', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y: 0 } };
   }
   if (mb.isChorus) {                                   // サビ
+    const emphWord = unit ? findLongestWord(unit) : null;
+    if (emphWord) {
+      return { pat: 'EMPH', exit: 'B6', meshH: 3.2, glow: '#ff70cc', params: { emphWord } };
+    }
     return CHORUS_CFGS[_chorIdx++ % CHORUS_CFGS.length]();
   }
   // Aメロ・Bメロ
@@ -378,10 +416,11 @@ const pool = [];
 
 function spawnPhrase(unit, songTimeMs) {
   const mb  = window.MusicBG || {};
-  const cfg = resolveConfig(mb, songTimeMs);
+  const cfg = resolveConfig(mb, songTimeMs, unit);
   const dur = unit.endTime - unit.startTime;
+  const displayText = (cfg.params?.emphWord?.text ?? unit.text ?? '').toUpperCase();
 
-  const { mesh, width: mw, height: mh } = makeTextMesh((unit.text || '').toUpperCase(), {
+  const { mesh, width: mw, height: mh } = makeTextMesh(displayText, {
     meshHeight: cfg.meshH,
     glowColor:  cfg.glow,
   });
