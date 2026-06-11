@@ -1,7 +1,7 @@
 /**
  * bg.js — GRAND BLUE background scene
  * ES module | Three.js via importmap
- * Deep blue space: camera tunnel, light streaks, Mt.Fuji, bloom, afterimage
+ * Deep blue space: camera tunnel, light streaks, bloom, afterimage
  */
 
 import * as THREE from 'three';
@@ -17,6 +17,14 @@ window.MusicBG = {
   beatIndex:    -1,
   isChorus:     false,
   isPlaying:    false,
+  phraseIndex:  0,
+  lyric: {
+    active:    false,
+    progress:  0,
+    wordStart: -1,
+    charStart: -1,
+    vocal:     0,
+  },
 };
 
 const canvas = document.getElementById('bg-canvas');
@@ -57,39 +65,6 @@ scene.add(rimLight);
 const flashLight = new THREE.PointLight(0xffffff, 0, 60);
 flashLight.position.set(0, 0, 8);
 scene.add(flashLight);
-
-// ── Mt. Fuji silhouette (far background, 静岡モチーフ) ─────────
-{
-  const shape = new THREE.Shape();
-  shape.moveTo(-18, 0);
-  shape.lineTo(-3, 13);   // left ridge
-  shape.lineTo(0, 14.5);  // peak
-  shape.lineTo(3, 13);    // right ridge
-  shape.lineTo(18, 0);
-  shape.closePath();
-
-  const fuji = new THREE.Mesh(
-    new THREE.ShapeGeometry(shape),
-    new THREE.MeshBasicMaterial({ color: 0x060f26, transparent: true, opacity: 0.75, depthWrite: false }),
-  );
-  fuji.scale.set(2.8, 2.8, 1);
-  fuji.position.set(0, -8, -100);
-  scene.add(fuji);
-
-  // Snow cap
-  const snow = new THREE.Shape();
-  snow.moveTo(-3, 12.2);
-  snow.lineTo(0, 14.5);
-  snow.lineTo(3, 12.2);
-  snow.closePath();
-  const snowMesh = new THREE.Mesh(
-    new THREE.ShapeGeometry(snow),
-    new THREE.MeshBasicMaterial({ color: 0x0d1e3d, transparent: true, opacity: 0.55, depthWrite: false }),
-  );
-  snowMesh.scale.set(2.8, 2.8, 1);
-  snowMesh.position.set(0, -8, -99.5);
-  scene.add(snowMesh);
-}
 
 // ── Star field ─────────────────────────────────────────────────
 {
@@ -217,6 +192,7 @@ let beatPulse = 0;
 let chorusAmt = 0;
 let energy    = 0;
 let flashAmt  = 0;
+let prevT = 0;
 
 // Reusable color objects (avoid per-frame allocation)
 const C_NORMAL = new THREE.Color(0x39c5bb);
@@ -227,6 +203,8 @@ const tmpColor  = new THREE.Color();
 function animate(ts) {
   requestAnimationFrame(animate);
   const t  = ts * 0.001;
+  const dt = Math.min(t - prevT, 0.05);
+  prevT    = t;
   const mb = window.MusicBG;
 
   // Beat detection
@@ -255,13 +233,13 @@ function animate(ts) {
   composer._bloom.threshold = Math.max(0.55, 0.82 - chorusAmt * 0.25);
   composer._afterimage.uniforms['damp'].value = 0.87 + chorusAmt * 0.05;
 
-  // Light streaks
-  const streakSpeed = (0.8 + energy * 5.0) * 0.22;
+  // Light streaks — 音楽と無関係に一定速度で流れる
+  const STREAK_SPEED = 0.28;
   for (const s of streakArr) {
-    s.mesh.position.z += s.speed * streakSpeed * (1 + chorusAmt * 0.8);
+    s.mesh.position.z += s.speed * STREAK_SPEED * dt * 60;
     if (s.mesh.position.z > camera.position.z + 2) resetStreak(s.mesh);
-    s.mesh.scale.z     = 1 + energy * 5;
-    s.mat.opacity      = 0.22 + energy * 0.5 + chorusAmt * 0.15;
+    s.mesh.scale.z = 2.2;
+    s.mat.opacity  = 0.38;
   }
 
   // Ring pulses (expand + fade)

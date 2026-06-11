@@ -117,38 +117,155 @@ function buildFigure() {
   return g;
 }
 
-function tickProcedural(fig, t, beat, cho) {
-  const r = fig._rig;
-  const sp = 1.15 + cho * 0.75;
-  const am = 0.8 + cho * 0.5;
+const damp = (cur, target, k) => cur + (target - cur) * k;
+const C_NORMAL = new THREE.Color(0x39c5bb);
+const C_CHORUS = new THREE.Color(0xff70cc);
+const tmpCol = new THREE.Color();
+const tmpEm  = new THREE.Color();
 
-  r.root.position.y = Math.abs(Math.sin(t * sp * 2)) * 0.055 * am - 0.02;
-  r.hips.rotation.z = Math.sin(t * sp) * 0.13 * am;
-  r.hips.rotation.y = Math.sin(t * sp * 0.5) * 0.1 * am;
-  r.spine.rotation.z = -Math.sin(t * sp + 0.3) * 0.07;
-  r.spine.rotation.x = Math.sin(t * sp * 0.7) * 0.05;
-  r.neck.rotation.y = Math.sin(t * sp * 1.3) * 0.22 * am;
-  r.neck.rotation.x = Math.sin(t * sp * 0.9) * 0.07;
+// ── Keypose interpolation system ─────────────────────────────
+const easeOutCubic   = t => 1 - (1 - t) ** 3;
+const easeInOutCubic = t => t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 
-  r.la.sh.rotation.x = Math.sin(t * sp + Math.PI) * 0.95 * am;
-  r.la.sh.rotation.z = 0.22 + Math.sin(t * sp * 0.5) * 0.14;
-  r.ra.sh.rotation.x = Math.sin(t * sp) * 0.95 * am;
-  r.ra.sh.rotation.z = -(0.22 + Math.sin(t * sp * 0.5 + Math.PI) * 0.14);
-  r.la.el.rotation.x = Math.max(0, Math.sin(t * sp + Math.PI)) * am;
-  r.ra.el.rotation.x = Math.max(0, Math.sin(t * sp)) * am;
+// 各ポーズ: la/ra = { sh:{x,z}, el:{x} }, spine/hips/neck = {x,y,z}
+// la = side:1(右腕), ra = side:-1(左腕)
+const POSES = [
+  // 0: 片手挙げ (la=右腕を上げる)
+  {
+    la:    { sh: { x: -2.2, z:  0.20 }, el: { x: 0.20 } },
+    ra:    { sh: { x: -0.1, z: -0.20 }, el: { x: 0.10 } },
+    spine: { z:  0.05, x:  0.00 },
+    hips:  { z:  0.05, y:  0.00 },
+    neck:  { y:  0.15, x:  0.00 },
+  },
+  // 1: 胸の前で両手
+  {
+    la:    { sh: { x: -0.90, z:  0.30 }, el: { x: 1.10 } },
+    ra:    { sh: { x: -0.90, z: -0.30 }, el: { x: 1.10 } },
+    spine: { z:  0.00, x:  0.05 },
+    hips:  { z:  0.00, y:  0.00 },
+    neck:  { y:  0.00, x: -0.10 },
+  },
+  // 2: 手を横に流す
+  {
+    la:    { sh: { x:  0.00, z:  1.20 }, el: { x: 0.10 } },
+    ra:    { sh: { x:  0.00, z: -1.20 }, el: { x: 0.10 } },
+    spine: { z:  0.00, x:  0.00 },
+    hips:  { z:  0.08, y:  0.12 },
+    neck:  { y:  0.15, x:  0.00 },
+  },
+  // 3: 腰に手
+  {
+    la:    { sh: { x:  0.40, z:  0.65 }, el: { x: 1.40 } },
+    ra:    { sh: { x:  0.40, z: -0.65 }, el: { x: 1.40 } },
+    spine: { z:  0.00, x: -0.05 },
+    hips:  { z:  0.00, y:  0.00 },
+    neck:  { y:  0.00, x:  0.08 },
+  },
+  // 4: 指差し (la=右腕を前に伸ばす)
+  {
+    la:    { sh: { x: -1.40, z:  0.10 }, el: { x: 0.00 } },
+    ra:    { sh: { x: -0.20, z: -0.18 }, el: { x: 0.25 } },
+    spine: { z: -0.08, x:  0.00 },
+    hips:  { z: -0.05, y: -0.12 },
+    neck:  { y: -0.20, x: -0.05 },
+  },
+];
 
-  r.ll.hip.rotation.x = Math.sin(t * sp) * 0.48 * am;
-  r.rl.hip.rotation.x = Math.sin(t * sp + Math.PI) * 0.48 * am;
-  r.ll.kn.rotation.x = Math.max(0, Math.sin(t * sp + Math.PI * 0.5)) * 0.55 * am;
-  r.rl.kn.rotation.x = Math.max(0, Math.sin(t * sp + Math.PI * 1.5)) * 0.55 * am;
+const _kp = {
+  cur:          0,
+  prev:         0,
+  beatBase:     -1,
+  transStart:   0,
+  transDur:     220, // ms — 素早く移行してピタッと止める
+  prevProgress: 1,   // フレーズ頭検知用
+  holdUntil:    0,   // 声量ホールド終了時刻 (performance.now ms)
+};
 
-  const cn = new THREE.Color(0x39c5bb);
-  const cc = new THREE.Color(0xff70cc);
-  const col = new THREE.Color().lerpColors(cn, cc, cho);
-  const em = col.clone().multiplyScalar(0.25);
-  fig._mats.forEach(m => { m.color.copy(col); m.emissive.copy(em); });
+/**
+ * キーポーズ補間ダンス
+ * セクションで緩急:
+ *   間奏(lyric.active=false) — ポーズ切り替え停止、軽く揺れるだけ
+ *   通常(Aメロ/Bメロ)       — 振幅 60%、4拍ごと切り替え
+ *   サビ(isChorus)          — 振幅 100%、2拍ごと切り替え
+ */
+function tickProcedural(fig, t, beat, cho, L) {
+  const r  = fig._rig;
+  const mb = window.MusicBG || {};
+  const bi = mb.beatIndex ?? 0;
 
-  fig.scale.setScalar(1 + beat * 0.055);
+  const isInterlude = !L.phrase || !mb.lyric?.active;
+  const isChorus    = mb.isChorus;
+
+  // セクションで切り替え間隔を決定 (間奏はポーズ固定)
+  const beatInterval = isChorus ? 2 : 4;
+  // 振幅係数: 間奏=0、通常=0.6、サビ=1.0
+  const amp = isInterlude ? 0 : isChorus ? 1.0 : 0.6;
+
+  if (!isInterlude) {
+    const now = performance.now();
+    const prog = L.progress ?? 1;
+
+    // 声量が 0.8 超えた瞬間: 0.3秒ホールド
+    if (L.vocal > 0.8 && _kp.holdUntil < now) {
+      _kp.holdUntil = now + 300;
+    }
+
+    // フレーズ頭(progress が前フレームより大きく巻き戻った): 次ポーズへ即切り替え
+    if (_kp.prevProgress > 0.15 && prog < 0.05 && now >= _kp.holdUntil) {
+      _kp.prev       = _kp.cur;
+      _kp.cur        = (_kp.cur + 1) % POSES.length;
+      _kp.beatBase   = bi;
+      _kp.transStart = now;
+    }
+    _kp.prevProgress = prog;
+
+    // ビート定期切り替え (ホールド中はスキップ)
+    if (_kp.beatBase < 0) _kp.beatBase = bi;
+    if (bi - _kp.beatBase >= beatInterval && now >= _kp.holdUntil) {
+      _kp.prev       = _kp.cur;
+      _kp.cur        = (_kp.cur + 1) % POSES.length;
+      _kp.beatBase   = bi;
+      _kp.transStart = now;
+    }
+  }
+
+  const e  = easeOutCubic(Math.min((performance.now() - _kp.transStart) / _kp.transDur, 1));
+  const pA = POSES[_kp.prev];
+  const pB = POSES[_kp.cur];
+  // amp=0 のときはニュートラル(ゼロ)へ、それ以外はポーズ間を補間
+  const lrp = (a, b) => (a + (b - a) * e) * amp;
+
+  // 腕
+  r.la.sh.rotation.x = lrp(pA.la.sh.x, pB.la.sh.x);
+  r.la.sh.rotation.z = lrp(pA.la.sh.z, pB.la.sh.z);
+  r.la.el.rotation.x = lrp(pA.la.el.x, pB.la.el.x);
+  r.ra.sh.rotation.x = lrp(pA.ra.sh.x, pB.ra.sh.x);
+  r.ra.sh.rotation.z = lrp(pA.ra.sh.z, pB.ra.sh.z);
+  r.ra.el.rotation.x = lrp(pA.ra.el.x, pB.ra.el.x);
+
+  // 体幹・首
+  r.spine.rotation.z = lrp(pA.spine.z, pB.spine.z);
+  r.spine.rotation.x = lrp(pA.spine.x, pB.spine.x);
+  r.hips.rotation.z  = lrp(pA.hips.z,  pB.hips.z);
+  r.hips.rotation.y  = lrp(pA.hips.y,  pB.hips.y);
+  r.neck.rotation.y  = lrp(pA.neck.y,  pB.neck.y) + (isInterlude ? Math.sin(t * 0.7) * 0.1 : 0);
+  r.neck.rotation.x  = lrp(pA.neck.x,  pB.neck.x);
+
+  // 膝バウンス — 常時継続
+  const kAmp = 0.18 + beat * 0.10;
+  r.ll.kn.rotation.x = Math.max(0, Math.sin(t * 4))           * kAmp;
+  r.rl.kn.rotation.x = Math.max(0, Math.sin(t * 4 + Math.PI)) * kAmp;
+
+  // 体全体の小さなボブ (間奏はさらに穏やか)
+  r.root.position.y = Math.abs(Math.sin(t * 4)) * (isInterlude ? 0.012 : 0.03);
+
+  // 色: サビで桃色へ、ビートで発光が強まる
+  tmpCol.lerpColors(C_NORMAL, C_CHORUS, cho);
+  tmpEm.copy(tmpCol).multiplyScalar(0.2 + beat * 0.35);
+  fig._mats.forEach(m => { m.color.copy(tmpCol); m.emissive.copy(tmpEm); });
+
+  fig.scale.setScalar(1 + beat * 0.04);
 }
 
 // ── GLTF loading ─────────────────────────────────────────────
@@ -158,6 +275,7 @@ let isProcedural = false;
 
 new GLTFLoader().load(
   './model.glb',
+  // './3D/test-animationn.glb',
   (gltf) => {
     figure = gltf.scene;
     const box3 = new THREE.Box3().setFromObject(figure);
@@ -183,43 +301,217 @@ new GLTFLoader().load(
 
 // ── Render loop ───────────────────────────────────────────────
 let prevBeat = -1, beatPulse = 0, choAmt = 0;
+// 歌詞同期の状態
+let prevWordStart = -1, wordPulse = 0, armSide = 1;
+let prevCharStart = -1, charPulse = 0;
+let phraseAmt = 0, vocalAmt = 0;
 const clock = new THREE.Clock();
+
+// ── Camera cue system ─────────────────────────────────────────
+// az/el/r/lx/ly/fov: 球座標ショットパラメータ
+//   type: "cut" = 瞬間切り替え | "sweep" = イージング移動
+//   sweepDur: 移行時間(秒), drift: 移動中の方位角ドリフト速度(deg/s)
+const CUES = [
+  // 0: 全身 正面
+  { az:   0, el:  5, r: 4.8, lx:  0.0, ly: 1.00, fov: 36, type: 'cut' },
+  // 1: 顔アップ sweep で近づく
+  { az:  12, el: 12, r: 1.6, lx:  0.0, ly: 1.58, fov: 22, type: 'sweep', sweepDur: 2.0, drift:  8 },
+  // 2: 上半身 左寄り
+  { az: -40, el:  7, r: 2.8, lx:  0.3, ly: 1.25, fov: 28, type: 'cut' },
+  // 3: 右サイド 回り込み sweep
+  { az:  70, el:  5, r: 3.8, lx:  0.0, ly: 1.00, fov: 38, type: 'sweep', sweepDur: 3.5, drift: 30 },
+  // 4: 俯瞰
+  { az: 160, el: 55, r: 4.5, lx:  0.0, ly: 1.10, fov: 46, type: 'cut' },
+  // 5: ローアングル 見上げ sweep
+  { az: 200, el: -8, r: 3.2, lx:  0.0, ly: 0.55, fov: 44, type: 'sweep', sweepDur: 2.5, drift: 20 },
+  // 6: 全身引き 右寄り
+  { az: 240, el:  4, r: 5.5, lx: -1.2, ly: 1.00, fov: 38, type: 'cut' },
+  // 7: 後ろから上半身 sweep
+  { az: 185, el: 25, r: 3.5, lx:  0.0, ly: 1.10, fov: 40, type: 'sweep', sweepDur: 2.8, drift: 15 },
+  // 8: 顔アップ 引き気味
+  { az: -20, el: 15, r: 1.9, lx:  0.0, ly: 1.50, fov: 26, type: 'cut' },
+  // 9: 左サイド 全身 sweep
+  { az: -80, el:  5, r: 4.2, lx:  0.0, ly: 1.00, fov: 40, type: 'sweep', sweepDur: 4.0, drift: 35 },
+];
+// 通常(Aメロ/Bメロ): sweep 多め、8拍ごと
+const VERSE_SEQ     = [1, 2, 5, 4, 3, 8, 7, 0, 9, 6];
+// サビ: cut 多め、4拍ごと
+const CHORUS_SEQ    = [8, 2, 6, 0, 4, 8, 2, 0, 6, 4];
+// 間奏: sweep のみ、16拍ごと
+const INTERLUDE_SEQ = [3, 9, 7, 5, 1];
+// サビ頭リセット用: 全身引き (CUES[6])
+const CHORUS_RESET_IDX = 6;
+
+let cueSeqIdx   = 0;   // 現在のシーケンス内ポジション
+let lastCueIdx  = -1;  // 直前に適用したキューインデックス (重複防止)
+let camBeatBase = -1;  // 前回切り替え時の beatIndex
+let prevIsChorus = false;
+
+// ライブカメラ球座標状態
+let camAz = 0, camEl = 5, camR = 4.8, camLx = 0, camLy = 1.0, camFov = 36;
+
+// アクティブ sweep トランジション (null = アイドル)
+// { fromEl, toEl, fromR, toR, fromLx, toLx, fromLy, toLy,
+//   fromFov, toFov, fromAz, toAz, startTime, dur, driftRate }
+let activeSweep = null;
+
+// キューを適用する。forceType で型を上書き可、durMult で sweep 時間を倍率調整
+function applyCue(cue, forceType, durMult) {
+  const type = forceType ?? cue.type;
+  if (type === 'cut') {
+    camAz  = cue.az;
+    camEl  = cue.el;
+    camR   = cue.r;
+    camLx  = cue.lx;
+    camLy  = cue.ly;
+    camFov = cue.fov;
+    activeSweep = null;
+  } else {
+    activeSweep = {
+      fromEl: camEl, toEl: cue.el,
+      fromR:  camR,  toR:  cue.r,
+      fromLx: camLx, toLx: cue.lx,
+      fromLy: camLy, toLy: cue.ly,
+      fromFov: camFov, toFov: cue.fov,
+      fromAz: camAz,  toAz: cue.az,
+      startTime: performance.now(),
+      dur: (cue.sweepDur ?? 3.0) * (durMult ?? 1) * 1000,
+      driftRate: cue.drift ?? 15,
+    };
+  }
+}
 
 (function animate() {
   requestAnimationFrame(animate);
   const dt  = clock.getDelta();
   const t   = clock.elapsedTime;
   const mb  = window.MusicBG || {};
+  const lyr = mb.lyric || {};
   const playing = mb.isPlaying || false;
 
   if (mb.beatIndex !== prevBeat && mb.beatIndex >= 0) { beatPulse = 1; prevBeat = mb.beatIndex; }
   beatPulse = Math.max(0, beatPulse - 0.055);
   choAmt   += ((mb.isChorus ? 1 : 0) - choAmt) * 0.04;
 
+  // 単語の頭でパルスを立て、腕を振る側を左右交互に切り替える
+  if (lyr.wordStart !== prevWordStart && lyr.wordStart >= 0) {
+    wordPulse = 1;
+    armSide   = -armSide;
+    prevWordStart = lyr.wordStart;
+  }
+  wordPulse = Math.max(0, wordPulse - dt * 3.2);
+
+  // 文字の刻み (うなずき用の短いパルス)
+  if (lyr.charStart !== prevCharStart && lyr.charStart >= 0) {
+    charPulse = 1;
+    prevCharStart = lyr.charStart;
+  }
+  charPulse = Math.max(0, charPulse - dt * 7);
+
+  phraseAmt += (((playing && lyr.active) ? 1 : 0) - phraseAmt) * 0.08;
+  vocalAmt  += ((playing ? (lyr.vocal || 0) : 0) - vocalAmt) * 0.18;
+
   if (figure) {
-    if (mixer) mixer.update(playing ? dt : 0);
+    if (mixer) {
+      // 歌声に合わせてアニメーション速度を変える
+      mixer.update(playing ? dt * (0.7 + phraseAmt * 0.4 + vocalAmt * 0.3) : 0);
+    }
 
     if (isProcedural) {
       if (playing) {
-        tickProcedural(figure, t, beatPulse, choAmt);
+        tickProcedural(figure, t, beatPulse, choAmt, {
+          phrase:   phraseAmt,
+          progress: lyr.progress || 0,
+          word:     wordPulse,
+          charTick: charPulse,
+          side:     armSide,
+          vocal:    vocalAmt,
+        });
       } else {
         figure._rig.neck.rotation.y = Math.sin(t * 0.6) * 0.1;
         figure._rig.root.position.y = Math.sin(t * 0.9) * 0.015;
         figure.scale.setScalar(1);
       }
     } else {
-      figure.scale.setScalar(1 + beatPulse * 0.03);
+      figure.scale.setScalar(1 + beatPulse * 0.03 + wordPulse * 0.04);
     }
 
     figure.rotation.y = Math.sin(t * 0.28) * 0.18;
   }
 
-  const cn = new THREE.Color(0x39c5bb);
-  const cc = new THREE.Color(0xff70cc);
-  const lc = new THREE.Color().lerpColors(cn, cc, choAmt);
-  key.color.copy(lc);
-  key.intensity = 2.5 + beatPulse * 2.5 + choAmt * 1.5;
+  tmpCol.lerpColors(C_NORMAL, C_CHORUS, choAmt);
+  key.color.copy(tmpCol);
+  key.intensity = 2.5 + beatPulse * 2.5 + choAmt * 1.5 + wordPulse * 1.2;
   fill.intensity = 1.2 + choAmt * 1.0;
+
+  // ── Camera — 拍数ベースの cut / sweep 演出 ──
+  const bi          = mb.beatIndex ?? -1;
+  const isChorus    = mb.isChorus  || false;
+  const isInterlude = !(lyr.active || false);
+
+  // サビ突入: 全身引きへ即 cut してリセット
+  if (isChorus && !prevIsChorus) {
+    applyCue(CUES[CHORUS_RESET_IDX], 'cut');
+    lastCueIdx  = CHORUS_RESET_IDX;
+    camBeatBase = bi;
+  }
+  prevIsChorus = isChorus;
+
+  // 拍ベース切り替え
+  if (bi >= 0 && camBeatBase < 0) camBeatBase = bi;
+  const beatInterval = isInterlude ? 16 : isChorus ? 4 : 8;
+  if (bi >= 0 && bi - camBeatBase >= beatInterval) {
+    camBeatBase = bi;
+    const seq = isInterlude ? INTERLUDE_SEQ : isChorus ? CHORUS_SEQ : VERSE_SEQ;
+    // 同じショットが連続しないよう最大2ステップ先送り
+    let nextPos = (cueSeqIdx + 1) % seq.length;
+    if (seq[nextPos] === lastCueIdx) nextPos = (nextPos + 1) % seq.length;
+    cueSeqIdx  = nextPos;
+    const nextCueIdx = seq[nextPos];
+    lastCueIdx = nextCueIdx;
+    // セクション別タイプ上書き: サビ→常に cut、間奏→常に sweep(1.8倍尺)
+    const forceType = isChorus ? 'cut' : isInterlude ? 'sweep' : null;
+    const durMult   = isInterlude ? 1.8 : 1;
+    applyCue(CUES[nextCueIdx], forceType, durMult);
+  }
+
+  if (activeSweep) {
+    const elapsed = performance.now() - activeSweep.startTime;
+    const p = Math.min(elapsed / activeSweep.dur, 1);
+    const e = easeInOutCubic(p);
+    camEl  = activeSweep.fromEl  + (activeSweep.toEl  - activeSweep.fromEl)  * e;
+    camR   = activeSweep.fromR   + (activeSweep.toR   - activeSweep.fromR)   * e;
+    camLx  = activeSweep.fromLx  + (activeSweep.toLx  - activeSweep.fromLx)  * e;
+    camLy  = activeSweep.fromLy  + (activeSweep.toLy  - activeSweep.fromLy)  * e;
+    camFov = activeSweep.fromFov + (activeSweep.toFov - activeSweep.fromFov) * e;
+    // az: ターゲットへ補間 + 移動中も連続ドリフト
+    camAz = activeSweep.fromAz + (activeSweep.toAz - activeSweep.fromAz) * e
+          + activeSweep.driftRate * (elapsed / 1000);
+    if (p >= 1) {
+      camAz = activeSweep.toAz + activeSweep.driftRate * activeSweep.dur / 1000;
+      activeSweep = null;
+    }
+  } else {
+    // カット間のアンビエント緩やかオービット (4〜10 deg/s)
+    camAz += (4 + choAmt * 6) * dt;
+  }
+
+  // 微細なハンドヘルドシェイク
+  const shakeX = Math.sin(t * 0.17) * 0.04 + (Math.random() - 0.5) * beatPulse * 0.02;
+  const shakeY = Math.sin(t * 0.23) * 0.03 + (Math.random() - 0.5) * beatPulse * 0.015;
+
+  // 球座標 → XYZ
+  const azRad = camAz * Math.PI / 180;
+  const elRad = camEl * Math.PI / 180;
+  const cosEl = Math.cos(elRad);
+  camera.position.set(
+    Math.sin(azRad) * cosEl * camR + shakeX,
+    Math.sin(elRad) * camR + 1.0   + shakeY,
+    Math.cos(azRad) * cosEl * camR,
+  );
+  camera.lookAt(camLx, camLy + wordPulse * 0.06, 0);
+  camera.fov = camFov;
+  camera.updateProjectionMatrix();
 
   renderer.render(scene, camera);
 })();

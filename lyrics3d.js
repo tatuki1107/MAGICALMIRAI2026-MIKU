@@ -32,6 +32,16 @@ new ResizeObserver(onResize).observe(canvas.parentElement || canvas);
 // ── Font preload ──────────────────────────────────────────────
 document.fonts.load("900 72px 'Noto Sans JP'").catch(() => {});
 
+// ── Visible dimensions at z=0 ────────────────────────────────
+function visibleWidth() {
+  const fovRad = camera.fov * (Math.PI / 180);
+  return 2 * Math.tan(fovRad / 2) * camera.position.z * camera.aspect;
+}
+function visibleHeight() {
+  const fovRad = camera.fov * (Math.PI / 180);
+  return 2 * Math.tan(fovRad / 2) * camera.position.z;
+}
+
 // ── Easing ───────────────────────────────────────────────────
 const easeOut2 = t => 1 - (1 - t) ** 2;
 const easeOut4 = t => 1 - (1 - t) ** 4;
@@ -57,6 +67,12 @@ function makeTextMesh(text, { meshHeight = 1.6, glowColor = '#39c5bb', textColor
   ctx.textBaseline  = 'middle';
   ctx.textAlign     = 'left';
 
+  // Dark outline (legibility without scrim)
+  ctx.shadowBlur    = 0;
+  ctx.strokeStyle   = '#020810';
+  ctx.lineWidth     = 7;
+  ctx.lineJoin      = 'round';
+  ctx.strokeText(text, pad, H / 2);
   // Outer glow
   ctx.shadowColor = glowColor;
   ctx.shadowBlur  = 28;
@@ -84,6 +100,71 @@ function makeTextMesh(text, { meshHeight = 1.6, glowColor = '#39c5bb', textColor
   return { mesh: new THREE.Mesh(geo, mat), width: meshW, height: meshHeight };
 }
 
+// ── Vertical text mesh factory ───────────────────────────────
+const _LONG_VOWEL = new Set('ー');
+const _SMALL_KANA = new Set('っゃゅょぁぃぅぇぉッャュョァィゥェォ');
+const _PUNC_RIGHT = new Set('。、・');
+
+function makeVerticalTextMesh(text, { glowColor = '#39c5bb', textColor = '#ffffff' } = {}) {
+  const fs      = 76;
+  const font    = `900 ${fs}px 'Noto Sans JP','Hiragino Kaku Gothic ProN',sans-serif`;
+  const cell    = Math.ceil(fs * 1.15);
+  const padPx   = Math.ceil(fs * 0.35);
+  const chars   = [...text];
+  const W       = cell + padPx * 2;
+  const H       = chars.length * cell + padPx * 2;
+
+  const cvs     = document.createElement('canvas');
+  cvs.width = W; cvs.height = H;
+  const ctx     = cvs.getContext('2d');
+  ctx.font      = font;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign    = 'center';
+  const cx = W / 2;
+
+  chars.forEach((ch, i) => {
+    const cy      = padPx + i * cell + cell / 2;
+    const isSmall = _SMALL_KANA.has(ch);
+    const isPunc  = _PUNC_RIGHT.has(ch);
+    const isLong  = _LONG_VOWEL.has(ch);
+    const ox      = (isSmall || isPunc) ?  cell * 0.18 : 0;
+    const oy      = (isSmall || isPunc) ? -cell * 0.18 : 0;
+
+    ctx.save();
+    if (isLong) {
+      ctx.translate(cx, cy);
+      ctx.rotate(Math.PI / 2);
+      ctx.shadowBlur  = 0;
+      ctx.strokeStyle = '#020810'; ctx.lineWidth = 7; ctx.lineJoin = 'round';
+      ctx.strokeText(ch, 0, 0);
+      ctx.shadowColor = glowColor; ctx.shadowBlur = 28;
+      ctx.fillStyle   = glowColor; ctx.fillText(ch, 0, 0);
+      ctx.shadowBlur  = 12; ctx.fillStyle = textColor; ctx.fillText(ch, 0, 0);
+      ctx.shadowBlur  = 0;  ctx.fillStyle = textColor; ctx.fillText(ch, 0, 0);
+    } else {
+      ctx.shadowBlur  = 0;
+      ctx.strokeStyle = '#020810'; ctx.lineWidth = 7; ctx.lineJoin = 'round';
+      ctx.strokeText(ch, cx + ox, cy + oy);
+      ctx.shadowColor = glowColor; ctx.shadowBlur = 28;
+      ctx.fillStyle   = glowColor; ctx.fillText(ch, cx + ox, cy + oy);
+      ctx.shadowBlur  = 12; ctx.fillStyle = textColor; ctx.fillText(ch, cx + ox, cy + oy);
+      ctx.shadowBlur  = 0;  ctx.fillStyle = textColor; ctx.fillText(ch, cx + ox, cy + oy);
+    }
+    ctx.restore();
+  });
+
+  const cellWorld  = 1.4;
+  const meshHeight = chars.length * cellWorld;
+  const meshWidth  = meshHeight * (W / H);
+  const geo = new THREE.PlaneGeometry(meshWidth, meshHeight);
+  const tex = new THREE.CanvasTexture(cvs);
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex, transparent: true, opacity: 0,
+    depthWrite: false, blending: THREE.NormalBlending,
+  });
+  return { mesh: new THREE.Mesh(geo, mat), width: meshWidth, height: meshHeight };
+}
+
 // ── Pattern definitions ───────────────────────────────────────
 // Each pattern: { init, in, active, out }
 // state = { mesh, params, ghosts, phaseStart, phase, ... }
@@ -96,17 +177,23 @@ const P = {
       s.dir   = s.params.dir ?? 1;
       s.baseY = s.params.y   ?? 0;
       s.mesh.position.set(s.dir * 12, s.baseY, s.params.z ?? -1);
+      s.mesh.rotation.z = s.dir * 0.1;
     },
     in(s, t) {
-      s.mesh.position.x       = s.dir * 12 * (1 - easeOut4(t));
+      const e = easeOut4(t);
+      s.mesh.position.x       = s.dir * 12 * (1 - e);
       s.mesh.material.opacity = clamp(t * 3.5, 0, 1);
+      // スライドイン中は傾け、止まる瞬間に水平へ戻す
+      s.mesh.rotation.z       = s.dir * 0.1 * (1 - e);
     },
     active(s, _t, mb) {
+      s.mesh.rotation.z       = 0;
       s.mesh.position.x      -= s.dir * 0.022 * 60;
       s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.09);
     },
     out(s, t) {
-      s.mesh.position.x      -= s.dir * 0.022 * 60 * 2;
+      // 逆側へ加速して画面外へ抜ける
+      s.mesh.position.x      += s.dir * 0.022 * 60 * (2 + t * 4);
       s.mesh.material.opacity = clamp(1 - t * 2.5, 0, 1);
     },
   },
@@ -174,31 +261,238 @@ const P = {
       s.mesh.scale.setScalar(1 + t * 0.45);
     },
   },
+
+  /** A7: DropIn — 上から落下してバウンド */
+  A7: {
+    init(s) {
+      s.baseY = s.params.y ?? 0;
+      s.mesh.position.set(s.params.x ?? 0, s.baseY + 4.5, s.params.z ?? 0);
+    },
+    in(s, t) {
+      s.mesh.position.y       = s.baseY + 4.5 * (1 - spring(clamp(t * 1.3, 0, 1)));
+      s.mesh.material.opacity = clamp(t * 4, 0, 1);
+    },
+    active(s, _t, mb) {
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.09);
+    },
+    out(s, t) {
+      s.mesh.position.y      -= t * 4.5;
+      s.mesh.material.opacity = 1 - easeOut2(t);
+    },
+  },
+
+  /** A8: GlitchFlash — グリッチで点滅しながら出現 */
+  A8: {
+    init(s) {
+      s.baseX = s.params.x ?? 0;
+      s.baseY = s.params.y ?? 0;
+      s.mesh.position.set(s.baseX, s.baseY, 0);
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      const flicker = t < 0.65 ? (Math.floor(t * 14) % 2) : 1;
+      s.mesh.material.opacity = flicker;
+      if (t < 0.65) {
+        s.mesh.position.x = s.baseX + (Math.random() - 0.5) * 0.45 * (1 - t);
+        s.mesh.position.y = s.baseY + (Math.random() - 0.5) * 0.18;
+        s.mesh.scale.setScalar(0.92 + Math.random() * 0.16 * (1 - t));
+      } else {
+        s.mesh.position.x += (s.baseX - s.mesh.position.x) * 0.4;
+        s.mesh.position.y += (s.baseY - s.mesh.position.y) * 0.4;
+        s.mesh.scale.setScalar(1);
+        s.mesh.material.opacity = 1;
+      }
+    },
+    active(s, _t, mb) {
+      s.mesh.material.opacity = 0.96;
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.1);
+      if (Math.random() < 0.025) {
+        s.mesh.position.x = s.baseX + (Math.random() - 0.5) * 0.12;
+      } else {
+        s.mesh.position.x += (s.baseX - s.mesh.position.x) * 0.35;
+      }
+    },
+    out(s, t) {
+      s.mesh.material.opacity = 1 - t;
+      if (Math.random() < 0.08) s.mesh.position.x = s.baseX + (Math.random() - 0.5) * 0.3;
+    },
+  },
+
+  /** A9: SlideUp — 下から滑り上がる */
+  A9: {
+    init(s) {
+      s.baseY = s.params.y ?? 0;
+      s.mesh.position.set(s.params.x ?? 0, s.baseY - 3.8, s.params.z ?? 0);
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      s.mesh.position.y       = s.baseY - 3.8 * (1 - easeOut4(t));
+      s.mesh.material.opacity = clamp(t * 2.8, 0, 1);
+    },
+    active(s, _t, mb) {
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.08);
+    },
+    out(s, t) {
+      s.mesh.position.y      += t * 3.5;
+      s.mesh.material.opacity = 1 - easeOut2(t);
+    },
+  },
+
+  /** EMPH: EmphasisWord — サビ最長単語を中央で2倍サイズ強調 */
+  EMPH: {
+    init(s) {
+      s.mesh.position.set(0, 0, 0.5);
+      s.mesh.scale.setScalar(0.05);
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      s.mesh.scale.setScalar(spring(clamp(t * 2, 0, 1)));
+      s.mesh.material.opacity = clamp(t * 5, 0, 1);
+    },
+    active(s, _t, mb) {
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.13);
+      s.mesh.material.opacity = 1;
+    },
+    out(s, t) {
+      s.mesh.scale.setScalar(1 + t * 0.6);
+      s.mesh.material.opacity = 1 - easeOut4(t);
+    },
+  },
+
+  /** A10: TwistIn — 薄い板から展開する */
+  A10: {
+    init(s) {
+      s.baseY = s.params.y ?? 0;
+      s.mesh.position.set(s.params.x ?? 0, s.baseY, 0);
+      s.mesh.scale.set(1.35, 0.01, 1);
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      const e = spring(clamp(t * 1.4, 0, 1));
+      s.mesh.scale.set(1.35 - e * 0.35, clamp(e, 0.01, 1), 1);
+      s.mesh.material.opacity = clamp(t * 3, 0, 1);
+    },
+    active(s, _t, mb) {
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.1);
+    },
+    out(s, t) {
+      s.mesh.scale.set(1 + t * 0.3, clamp(1 - t * 1.6, 0.01, 1), 1);
+      s.mesh.material.opacity = 1 - easeOut2(t);
+    },
+  },
+  /** VERTICAL: 縦書きで画面左端/右端にフェードイン・フェードアウト */
+  VERTICAL: {
+    init(s) {
+      s.side  = s.params.side ?? 1;
+      const halfW = visibleWidth() / 2;
+      s.baseX = s.side * (halfW - (s.params.meshWidth ?? 1) / 2 - 0.15);
+      s.mesh.position.set(s.baseX, 0, 0);
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      s.mesh.material.opacity = clamp(t * 2.5, 0, 1);
+    },
+    active(s, _t) {
+      s.mesh.material.opacity = 1;
+    },
+    out(s, t) {
+      s.mesh.material.opacity = 1 - easeOut2(t);
+    },
+  },
+
+  /** SPIN: SpinIn — z軸1回転しながらフェードイン、正位置で止まる */
+  SPIN: {
+    init(s) {
+      s.baseY = s.params.y ?? 0;
+      s.mesh.position.set(0, s.baseY, s.params.z ?? 0);
+      s.mesh.rotation.z = Math.PI * 2;
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      const e = easeOut4(t);
+      s.mesh.rotation.z       = Math.PI * 2 * (1 - e);
+      s.mesh.material.opacity = clamp(t * 3, 0, 1);
+    },
+    active(s, _t, mb) {
+      s.mesh.rotation.z       = 0;
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.09);
+    },
+    out(s, t) {
+      s.mesh.material.opacity = clamp(1 - t * 2.5, 0, 1);
+    },
+  },
 };
 
 // Exit patterns
 const EXIT = {
-  B1: (s, t) => { s.mesh.position.z -= t * 9; s.mesh.material.opacity = 1 - easeOut2(t); },
+  B1: (s, t) => { s.mesh.position.z -= t * 9;   s.mesh.material.opacity = 1 - easeOut2(t); },
+  B2: (s, t) => { s.mesh.position.y -= t * 4.5; s.mesh.material.opacity = 1 - easeOut2(t); },
+  B3: (s, t) => { s.mesh.scale.setScalar(1 - easeOut2(t)); s.mesh.material.opacity = 1 - t; },
+  B4: (s, t) => { s.mesh.position.x += t * 6;   s.mesh.material.opacity = 1 - easeOut2(t); },
+  B5: (s, t) => { s.mesh.position.x -= t * 6;   s.mesh.material.opacity = 1 - easeOut2(t); },
   B6: (s, t) => { s.mesh.material.opacity = 1 - t; },
 };
 
+// ── Emphasis word detection ───────────────────────────────────
+function findLongestWord(unit) {
+  const words = unit.words
+    ?? (unit.children ?? []).filter(c => c.text && /\S/.test(c.text));
+  if (!words || words.length === 0) return null;
+  let best = null, bestDur = 0;
+  for (const w of words) {
+    const dur = (w.endTime ?? 0) - (w.startTime ?? 0);
+    if (dur > bestDur) { bestDur = dur; best = w; }
+  }
+  return best && bestDur > 0 ? best : null;
+}
+
 // ── Section → Config resolver ────────────────────────────────
 let _dirToggle = 1;
+let _vertDir   = 1;
 const _ySlots  = [-1.2, 0, 1.2, -0.6, 0.6];
 let   _yIdx    = 0;
+let   _verseIdx = 0;
+let   _chorIdx  = 0;
 
-function resolveConfig(mb, songTime) {
+// Verse patterns: 4フレーズに1回 VERTICAL を挟む
+const VERSE_CFGS = [
+  (dir, y) => ({ pat: 'A2',       exit: 'B1', meshH: 1.5, glow: '#39c5bb', params: { dir, y } }),
+  (_,   y) => ({ pat: 'SPIN',     exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (_,   y) => ({ pat: 'A9',       exit: 'B2', meshH: 1.5, glow: '#4488ff', params: { y } }),
+  ()       => ({ pat: 'VERTICAL', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { vertical: true } }),
+  (_,   y) => ({ pat: 'A8',       exit: 'B6', meshH: 1.6, glow: '#aaeeff', params: { y } }),
+  (_,   y) => ({ pat: 'SPIN',     exit: 'B6', meshH: 1.5, glow: '#aaeeff', params: { y } }),
+  (_,   y) => ({ pat: 'A10',      exit: 'B3', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  ()       => ({ pat: 'VERTICAL', exit: 'B6', meshH: 1.5, glow: '#4488ff', params: { vertical: true } }),
+  (_,   y) => ({ pat: 'A7',       exit: 'B2', meshH: 1.5, glow: '#88ffee', params: { y } }),
+  (_,   y) => ({ pat: 'SPIN',     exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (_,   y) => ({ pat: 'A5',       exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  ()       => ({ pat: 'VERTICAL', exit: 'B6', meshH: 1.5, glow: '#88ffee', params: { vertical: true } }),
+];
+
+// Chorus patterns: 4種類をローテーション
+const CHORUS_CFGS = [
+  () => ({ pat: 'A6',  exit: 'B1', meshH: 2.2, glow: '#ff70cc', params: { y: 0 } }),
+  () => ({ pat: 'A3',  exit: 'B3', meshH: 2.0, glow: '#ff70cc', params: { y: 0 } }),
+  () => ({ pat: 'A7',  exit: 'B1', meshH: 2.2, glow: '#ffd166', params: { y: 0 } }),
+  () => ({ pat: 'A10', exit: 'B3', meshH: 2.0, glow: '#ff88cc', params: { y: 0 } }),
+];
+
+function resolveConfig(mb, songTime, unit) {
   if (songTime < 12000) {                              // イントロ
     return { pat: 'A5', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y: 0 } };
   }
   if (mb.isChorus) {                                   // サビ
-    _dirToggle = 1;
-    return { pat: 'A6', exit: 'B1', meshH: 2.2, glow: '#ff70cc', params: { y: 0 } };
+    const emphWord = unit ? findLongestWord(unit) : null;
+    if (emphWord) {
+      return { pat: 'EMPH', exit: 'B6', meshH: 3.2, glow: '#ff70cc', params: { emphWord } };
+    }
+    return CHORUS_CFGS[_chorIdx++ % CHORUS_CFGS.length]();
   }
   // Aメロ・Bメロ
   _dirToggle = -_dirToggle;
-  const y    = _ySlots[_yIdx++ % _ySlots.length];
-  return { pat: 'A2', exit: 'B1', meshH: 1.5, glow: '#39c5bb', params: { dir: _dirToggle, y } };
+  const y = _ySlots[_yIdx++ % _ySlots.length];
+  return VERSE_CFGS[_verseIdx++ % VERSE_CFGS.length](_dirToggle, y);
 }
 
 // ── Ghost trail ───────────────────────────────────────────────
@@ -208,7 +502,7 @@ function addGhosts(s) {
   s.ghosts = [];
   for (let i = 0; i < GHOST_N; i++) {
     const g  = s.mesh.clone();
-    // Remove scrim child — ghosts don't need backing panels
+    // Remove mesh children — ghosts don't need them
     while (g.children.length > 0) g.remove(g.children[0]);
     g.material = s.mesh.material.clone();
     g.material.opacity = 0;
@@ -241,7 +535,6 @@ function disposePhrase(s) {
   s.mesh.geometry.dispose();
   s.mesh.material.map?.dispose();
   s.mesh.material.dispose();
-  s.scrimMat?.dispose();
   s.ghosts.forEach(g => { scene.remove(g); g.material.dispose(); });
   s.dead = true;
 }
@@ -251,34 +544,37 @@ const pool = [];
 
 function spawnPhrase(unit, songTimeMs) {
   const mb  = window.MusicBG || {};
-  const cfg = resolveConfig(mb, songTimeMs);
+  const cfg = resolveConfig(mb, songTimeMs, unit);
   const dur = unit.endTime - unit.startTime;
+  const displayText = (cfg.params?.emphWord?.text ?? unit.text ?? '').toUpperCase();
 
-  const { mesh, width: mw, height: mh } = makeTextMesh(unit.text || '', {
-    meshHeight: cfg.meshH,
-    glowColor:  cfg.glow,
-  });
-
-  // Dark scrim behind text for readability
-  const scrimMat = new THREE.MeshBasicMaterial({
-    color: 0x020810,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-  });
-  const scrim = new THREE.Mesh(
-    new THREE.PlaneGeometry(mw + 0.6, mh + 0.35),
-    scrimMat,
-  );
-  scrim.position.z = -0.04;
-  mesh.add(scrim);
+  let mesh, mw, mh;
+  if (cfg.params?.vertical) {
+    // 縦書き: 左右交互に配置
+    _vertDir = -_vertDir;
+    cfg.params.side = _vertDir;
+    ({ mesh, width: mw, height: mh } = makeVerticalTextMesh(displayText, { glowColor: cfg.glow }));
+    cfg.params.meshWidth = mw;
+  } else {
+    ({ mesh, width: mw, height: mh } = makeTextMesh(displayText, {
+      meshHeight: cfg.meshH,
+      glowColor:  cfg.glow,
+    }));
+  }
 
   scene.add(mesh);
+
+  // 幅・高さ両方で 90% に収まるよう clampScale を計算
+  const wAllow = visibleWidth()  * 0.9;
+  const hAllow = visibleHeight() * 0.9;
+  const clampScale = Math.min(
+    mw > wAllow ? wAllow / mw : 1,
+    mh > hAllow ? hAllow / mh : 1,
+  );
 
   const pat = P[cfg.pat] || P.A2;
   const s   = {
     mesh,
-    scrimMat,
     pattern: pat,
     exitFn:  EXIT[cfg.exit] || EXIT.B6,
     params:  cfg.params || {},
@@ -289,6 +585,9 @@ function spawnPhrase(unit, songTimeMs) {
     t0:      performance.now(),
     dead:    false,
     ghosts:  [],
+    clampScale,
+    meshWidth:  mw,
+    meshHeight: mh,
   };
 
   pat.init(s);
@@ -331,8 +630,13 @@ let prevBeat = -1;
       if (t >= 1) { disposePhrase(s); continue; }
     }
 
-    // Sync scrim opacity with text opacity
-    if (s.scrimMat) s.scrimMat.opacity = s.mesh.material.opacity * 0.52;
+    // Clamp scale so mesh stays within 90% of visible width and height (recalc each frame for resize)
+    const liveClamp = Math.min(
+      s.clampScale,
+      visibleWidth()  * 0.9 / s.meshWidth,
+      visibleHeight() * 0.9 / s.meshHeight,
+    );
+    if (s.mesh.scale.x > liveClamp) s.mesh.scale.multiplyScalar(liveClamp / s.mesh.scale.x);
 
     updateGhosts(s);
   }

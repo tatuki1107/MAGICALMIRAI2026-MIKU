@@ -3,78 +3,70 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Magical Mirai 2026</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='32' fill='%23000510'/%3E%3Cpath d='M24 14v30.5a7.5 7.5 0 1 0 4 6.5V26.8l16-4V40.5a7.5 7.5 0 1 0 4 6.5V18z' fill='%2339c5bb'/%3E%3C/svg%3E" />
+    <title>TAKEOVER Camera Stage</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23000308'/%3E%3Cpath d='M18 42 32 12l14 30-14-8z' fill='%2339c5bb'/%3E%3Cpath d='M24 46h16' stroke='%23ffd166' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap" rel="stylesheet" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./style.css" />
     <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+        }
       }
-    }
     </script>
   </head>
   <body>
-    <div class="concert-wrap">
-      <canvas id="bg-canvas" aria-hidden="true"></canvas>
-      <canvas id="dancer-canvas" aria-hidden="true"></canvas>
-      <canvas id="lyrics3d-canvas" aria-hidden="true"></canvas>
+    <main class="stage-shell">
+      <canvas id="stage-canvas" aria-label="3D model camera stage"></canvas>
 
-      <!-- Top HUD: NOW PLAYING + status -->
       <header class="stage-hud">
-        <div class="now-playing">
-          <p class="np-label">NOW PLAYING</p>
-          <div class="np-info">
-            <strong id="songTitle">-</strong>
-            <span id="artistName">-</span>
+        <div class="now-playing" aria-live="polite">
+          <p>TEXTALIVE CAMERA STAGE</p>
+          <div>
+            <strong id="songTitle">TAKEOVER</strong>
+            <span id="artistName">Twinfield</span>
           </div>
         </div>
-        <div class="status-pill" id="status">初期化中</div>
+        <div class="status-pill" id="status">Initializing</div>
       </header>
 
-      <!-- Lyrics: center stage -->
-      <div class="lyrics-stage" aria-label="歌詞表示">
-        <div class="phrase" id="phrase">-</div>
-      </div>
+      <aside class="shot-panel" aria-label="current camera and phrase">
+        <span id="shotName">Shot 01</span>
+        <span id="animationName">Animation loading</span>
+      </aside>
 
-      <!-- Beat meter above controls -->
+      <section class="phrase-panel" aria-live="polite">
+        <p>PHRASE</p>
+        <div class="phrase" id="phrase">-</div>
+      </section>
+
       <div class="beat-meter" aria-hidden="true">
         <div id="beatBar"></div>
       </div>
 
-      <!-- Bottom controls overlay -->
-      <footer class="controls-overlay" id="controlPanel" aria-label="再生操作">
-        <div class="controls-inner">
-          <div class="transport">
-            <button type="button" id="play"   aria-label="再生"       title="再生"       disabled>▶</button>
-            <button type="button" id="pause"  aria-label="一時停止"   title="一時停止"   disabled>Ⅱ</button>
-            <button type="button" id="stop"   aria-label="停止"       title="停止"       disabled>■</button>
-            <button type="button" id="rewind" aria-label="先頭へ戻る" title="先頭へ戻る" disabled>↺</button>
-            <button type="button" id="jump"   aria-label="歌詞の先頭へ" title="歌詞の先頭へ" disabled>|&lt;</button>
-          </div>
+      <footer class="controls-overlay" id="controlPanel" aria-label="playback controls">
+        <div class="transport">
+          <button type="button" id="play" aria-label="Play" title="Play" disabled>&#9654;</button>
+          <button type="button" id="pause" aria-label="Pause" title="Pause" disabled>II</button>
+          <button type="button" id="stop" aria-label="Stop" title="Stop" disabled>&#9632;</button>
+          <button type="button" id="rewind" aria-label="Rewind" title="Rewind" disabled>&#8634;</button>
+          <button type="button" id="jump" aria-label="Jump to first phrase" title="Jump to first phrase" disabled>|&lt;</button>
+        </div>
 
-          <div class="seek-row">
-            <input id="seek" type="range" min="0" max="0" value="0" step="100" disabled />
-            <span class="time-display">
-              <span id="position">0:00.000</span>
-              <span class="time-sep">/</span>
-              <span id="duration">0:00.000</span>
-            </span>
-          </div>
-
-          <div class="volume-row">
-            <label for="volume">🔊</label>
-            <input id="volume" type="range" min="0" max="100" value="30" step="1" />
-            <span id="volumeVal">30</span>
-          </div>
+        <div class="seek-row">
+          <input id="seek" type="range" min="0" max="0" value="0" step="100" disabled aria-label="Seek" />
+          <span class="time-display">
+            <span id="position">0:00.000</span>
+            <span class="time-sep">/</span>
+            <span id="duration">0:00.000</span>
+          </span>
         </div>
       </footer>
-    </div>
+    </main>
 
-    <!-- JS-required elements (hidden from view) -->
     <div hidden aria-hidden="true">
       <span id="beat">-</span>
       <span id="chord">-</span>
@@ -88,14 +80,19 @@
     <div id="media" aria-hidden="true"></div>
 
     <script>
-      // Initialize shared state before any other script runs
-      window.MusicBG = { beatProgress: 0, beatIndex: -1, isChorus: false, isPlaying: false };
+      window.MusicBG = {
+        beatProgress: 0,
+        beatIndex: -1,
+        isChorus: false,
+        isPlaying: false,
+        phraseIndex: 0,
+        phrase: { index: 0, text: "", startTime: -1, endTime: -1, progress: 0 },
+        lyric: { active: false, progress: 0, wordStart: -1, charStart: -1, vocal: 0 }
+      };
     </script>
-    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
-    <script src="https://unpkg.com/textalive-app-api/dist/index.js"></script>
+    <script src="https://unpkg.com/axios@1.17.0/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/textalive-app-api@0.4.0/dist/index.js"></script>
+    <script type="module" src="./stage3d.js"></script>
     <script src="./app.js"></script>
-    <script type="module" src="./bg.js"></script>
-    <script type="module" src="./dancer.js"></script>
-    <script type="module" src="./lyrics3d.js"></script>
   </body>
 </html>
