@@ -325,9 +325,11 @@ const CHORUS_SEQ = [6, 2, 7, 1, 6, 4, 7, 5];
 
 let shotSeqIdx    = 0;
 let prevPhraseIdx = -1;
-// 現在の球座標パラメータ (常に lerp で更新)
-let curAz  = 0, curEl  = 5,  curR  = 4.2, curLx  = 0.0, curLy  = 1.0, curFov  = 36;
-let tgtAz  = 0, tgtEl  = 5,  tgtR  = 4.2, tgtLx  = 0.0, tgtLy  = 1.0, tgtFov  = 36;
+// orbitAz: 毎フレーム加算する連続回転方位角 (deg)。ショット切り替えでは変えない
+let orbitAz = 0;
+// el, r, lx, ly, fov のみショットから lerp
+let curEl  = 5,  curR  = 4.2, curLx  = 0.0, curLy  = 1.0, curFov  = 36;
+let tgtEl  = 5,  tgtR  = 4.2, tgtLx  = 0.0, tgtLy  = 1.0, tgtFov  = 36;
 
 (function animate() {
   requestAnimationFrame(animate);
@@ -392,24 +394,26 @@ let tgtAz  = 0, tgtEl  = 5,  tgtR  = 4.2, tgtLx  = 0.0, tgtLy  = 1.0, tgtFov  = 
   key.intensity = 2.5 + beatPulse * 2.5 + choAmt * 1.5 + wordPulse * 1.2;
   fill.intensity = 1.2 + choAmt * 1.0;
 
-  // ── Camera — フレーズごとにショット切り替え、弧を描いて移動 ──
+  // ── Camera — フレーズごとにショット切り替え、オービット継続 ──
   const phraseIdx = mb.phraseIndex || 0;
   if (phraseIdx !== prevPhraseIdx) {
     prevPhraseIdx = phraseIdx;
     shotSeqIdx++;
     const seq  = choAmt > 0.5 ? CHORUS_SEQ : VERSE_SEQ;
     const shot = SHOTS[seq[shotSeqIdx % seq.length]];
-    tgtAz  = shot.az;
+    // az は orbit が担うので変更しない。el/r/lx/ly/fov のみ更新
     tgtEl  = shot.el;
     tgtR   = shot.r;
     tgtLx  = shot.lx;
     tgtLy  = shot.ly;
     tgtFov = shot.f;
   }
-  // 方位角は最短経路でゆっくり補間 (直線ではなく弧)
-  const azDiff = ((tgtAz - curAz + 540) % 360) - 180;
-  const k = 0.014; // ゆっくり
-  curAz  += azDiff * k;
+
+  // オービット: 基本 12 deg/s (30秒1周)、サビは 22 deg/s (約16秒1周)
+  const orbitSpeed = 12 + (22 - 12) * choAmt;
+  orbitAz += orbitSpeed * dt;
+
+  const k = 0.014;
   curEl  += (tgtEl  - curEl)  * k;
   curR   += (tgtR   - curR)   * k;
   curLx  += (tgtLx  - curLx)  * k;
@@ -417,7 +421,7 @@ let tgtAz  = 0, tgtEl  = 5,  tgtR  = 4.2, tgtLx  = 0.0, tgtLy  = 1.0, tgtFov  = 
   curFov += (tgtFov - curFov) * k;
 
   // 球座標 → XYZ に変換してカメラ位置を計算
-  const azRad = curAz * Math.PI / 180;
+  const azRad = orbitAz * Math.PI / 180;
   const elRad = curEl * Math.PI / 180;
   const cosEl = Math.cos(elRad);
   const bx = Math.sin(t * 0.17) * 0.04 + (Math.random() - 0.5) * beatPulse * 0.02;
