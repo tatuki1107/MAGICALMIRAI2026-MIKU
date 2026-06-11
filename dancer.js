@@ -124,7 +124,8 @@ const tmpCol = new THREE.Color();
 const tmpEm  = new THREE.Color();
 
 // ── Keypose interpolation system ─────────────────────────────
-const easeOutCubic = t => 1 - (1 - t) ** 3;
+const easeOutCubic   = t => 1 - (1 - t) ** 3;
+const easeInOutCubic = t => t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 
 // 各ポーズ: la/ra = { sh:{x,z}, el:{x} }, spine/hips/neck = {x,y,z}
 // la = side:1(右腕), ra = side:-1(左腕)
@@ -306,30 +307,45 @@ let prevCharStart = -1, charPulse = 0;
 let phraseAmt = 0, vocalAmt = 0;
 const clock = new THREE.Clock();
 
-// ── Camera shot system (spherical coords) ──────────────────
-// az: 方位角(deg), el: 仰角(deg), r: 距離, lx: lookAt X, ly: lookAt Y, f: FOV
-// lx>0 → モデルが画面左寄り、lx<0 → 右寄り (字幕との重複を避けやすい)
-const SHOTS = [
-  { az:   0, el:  5,  r: 4.2, lx:  0.0, ly: 1.0,  f: 36 }, // 0 FRONT (中央)
-  { az:   5, el: 38,  r: 4.6, lx:  0.0, ly: 0.85, f: 38 }, // 1 HIGH (俯瞰)
-  { az:   0, el:  8,  r: 1.9, lx:  0.0, ly: 1.58, f: 26 }, // 2 CLOSE (顔アップ)
-  { az: -55, el:  5,  r: 4.2, lx:  0.0, ly: 1.0,  f: 40 }, // 3 SIDE_L
-  { az:  55, el:  5,  r: 4.2, lx:  0.0, ly: 1.0,  f: 40 }, // 4 SIDE_R
-  { az: 175, el: 28,  r: 4.5, lx:  0.0, ly: 1.1,  f: 44 }, // 5 BACK (後ろ俯瞰)
-  { az:   0, el:  8,  r: 4.0, lx:  1.3, ly: 1.0,  f: 38 }, // 6 LEFT_THIRD (モデル左寄り)
-  { az:   0, el:  8,  r: 4.0, lx: -1.3, ly: 1.0,  f: 38 }, // 7 RIGHT_THIRD (モデル右寄り)
+// ── Camera cue system ─────────────────────────────────────────
+// az/el/r/lx/ly/fov: 球座標ショットパラメータ
+//   type: "cut" = 瞬間切り替え | "sweep" = イージング移動
+//   sweepDur: 移行時間(秒), drift: 移動中の方位角ドリフト速度(deg/s)
+const CUES = [
+  // 0: 全身 正面
+  { az:   0, el:  5, r: 4.8, lx:  0.0, ly: 1.00, fov: 36, type: 'cut' },
+  // 1: 顔アップ sweep で近づく
+  { az:  12, el: 12, r: 1.6, lx:  0.0, ly: 1.58, fov: 22, type: 'sweep', sweepDur: 2.0, drift:  8 },
+  // 2: 上半身 左寄り
+  { az: -40, el:  7, r: 2.8, lx:  0.3, ly: 1.25, fov: 28, type: 'cut' },
+  // 3: 右サイド 回り込み sweep
+  { az:  70, el:  5, r: 3.8, lx:  0.0, ly: 1.00, fov: 38, type: 'sweep', sweepDur: 3.5, drift: 30 },
+  // 4: 俯瞰
+  { az: 160, el: 55, r: 4.5, lx:  0.0, ly: 1.10, fov: 46, type: 'cut' },
+  // 5: ローアングル 見上げ sweep
+  { az: 200, el: -8, r: 3.2, lx:  0.0, ly: 0.55, fov: 44, type: 'sweep', sweepDur: 2.5, drift: 20 },
+  // 6: 全身引き 右寄り
+  { az: 240, el:  4, r: 5.5, lx: -1.2, ly: 1.00, fov: 38, type: 'cut' },
+  // 7: 後ろから上半身 sweep
+  { az: 185, el: 25, r: 3.5, lx:  0.0, ly: 1.10, fov: 40, type: 'sweep', sweepDur: 2.8, drift: 15 },
+  // 8: 顔アップ 引き気味
+  { az: -20, el: 15, r: 1.9, lx:  0.0, ly: 1.50, fov: 26, type: 'cut' },
+  // 9: 左サイド 全身 sweep
+  { az: -80, el:  5, r: 4.2, lx:  0.0, ly: 1.00, fov: 40, type: 'sweep', sweepDur: 4.0, drift: 35 },
 ];
-// 正面ど真ん中(0)が連続しないようにオフセットショットを間に挿入
-const VERSE_SEQ  = [6, 3, 7, 1, 6, 4, 7, 5, 6, 2, 7, 3];
-const CHORUS_SEQ = [6, 2, 7, 1, 6, 4, 7, 5];
+const VERSE_SEQ  = [0, 2, 5, 3, 8, 6, 7, 1, 9, 4];
+const CHORUS_SEQ = [1, 3, 5, 7, 2, 9, 4, 8];
 
-let shotSeqIdx    = 0;
+let cueSeqIdx    = 0;
 let prevPhraseIdx = -1;
-// orbitAz: 毎フレーム加算する連続回転方位角 (deg)。ショット切り替えでは変えない
-let orbitAz = 0;
-// el, r, lx, ly, fov のみショットから lerp
-let curEl  = 5,  curR  = 4.2, curLx  = 0.0, curLy  = 1.0, curFov  = 36;
-let tgtEl  = 5,  tgtR  = 4.2, tgtLx  = 0.0, tgtLy  = 1.0, tgtFov  = 36;
+
+// ライブカメラ球座標状態
+let camAz = 0, camEl = 5, camR = 4.8, camLx = 0, camLy = 1.0, camFov = 36;
+
+// アクティブ sweep トランジション (null = アイドル)
+// { fromEl, toEl, fromR, toR, fromLx, toLx, fromLy, toLy,
+//   fromFov, toFov, fromAz, toAz, startTime, dur, driftRate }
+let activeSweep = null;
 
 (function animate() {
   requestAnimationFrame(animate);
@@ -394,45 +410,75 @@ let tgtEl  = 5,  tgtR  = 4.2, tgtLx  = 0.0, tgtLy  = 1.0, tgtFov  = 36;
   key.intensity = 2.5 + beatPulse * 2.5 + choAmt * 1.5 + wordPulse * 1.2;
   fill.intensity = 1.2 + choAmt * 1.0;
 
-  // ── Camera — フレーズごとにショット切り替え、オービット継続 ──
+  // ── Camera — カメラキューによる cut / sweep 演出 ──
   const phraseIdx = mb.phraseIndex || 0;
   if (phraseIdx !== prevPhraseIdx) {
     prevPhraseIdx = phraseIdx;
-    shotSeqIdx++;
-    const seq  = choAmt > 0.5 ? CHORUS_SEQ : VERSE_SEQ;
-    const shot = SHOTS[seq[shotSeqIdx % seq.length]];
-    // az は orbit が担うので変更しない。el/r/lx/ly/fov のみ更新
-    tgtEl  = shot.el;
-    tgtR   = shot.r;
-    tgtLx  = shot.lx;
-    tgtLy  = shot.ly;
-    tgtFov = shot.f;
+    cueSeqIdx++;
+    const seq = choAmt > 0.5 ? CHORUS_SEQ : VERSE_SEQ;
+    const cue = CUES[seq[cueSeqIdx % seq.length]];
+
+    if (cue.type === 'cut') {
+      // 瞬間切り替え: 全パラメータをスナップ
+      camAz  = cue.az;
+      camEl  = cue.el;
+      camR   = cue.r;
+      camLx  = cue.lx;
+      camLy  = cue.ly;
+      camFov = cue.fov;
+      activeSweep = null;
+    } else {
+      // sweep: 現在状態からターゲットへ滑らかに移動
+      activeSweep = {
+        fromEl: camEl, toEl: cue.el,
+        fromR:  camR,  toR:  cue.r,
+        fromLx: camLx, toLx: cue.lx,
+        fromLy: camLy, toLy: cue.ly,
+        fromFov: camFov, toFov: cue.fov,
+        fromAz: camAz,   toAz: cue.az,
+        startTime: performance.now(),
+        dur: cue.sweepDur * 1000,
+        driftRate: cue.drift,
+      };
+    }
   }
 
-  // オービット: 基本 12 deg/s (30秒1周)、サビは 22 deg/s (約16秒1周)
-  const orbitSpeed = 12 + (22 - 12) * choAmt;
-  orbitAz += orbitSpeed * dt;
+  if (activeSweep) {
+    const elapsed = performance.now() - activeSweep.startTime;
+    const p = Math.min(elapsed / activeSweep.dur, 1);
+    const e = easeInOutCubic(p);
+    camEl  = activeSweep.fromEl  + (activeSweep.toEl  - activeSweep.fromEl)  * e;
+    camR   = activeSweep.fromR   + (activeSweep.toR   - activeSweep.fromR)   * e;
+    camLx  = activeSweep.fromLx  + (activeSweep.toLx  - activeSweep.fromLx)  * e;
+    camLy  = activeSweep.fromLy  + (activeSweep.toLy  - activeSweep.fromLy)  * e;
+    camFov = activeSweep.fromFov + (activeSweep.toFov - activeSweep.fromFov) * e;
+    // az: ターゲットへ補間 + 移動中も連続ドリフト
+    camAz = activeSweep.fromAz + (activeSweep.toAz - activeSweep.fromAz) * e
+          + activeSweep.driftRate * (elapsed / 1000);
+    if (p >= 1) {
+      camAz = activeSweep.toAz + activeSweep.driftRate * activeSweep.dur / 1000;
+      activeSweep = null;
+    }
+  } else {
+    // カット間のアンビエント緩やかオービット (4〜10 deg/s)
+    camAz += (4 + choAmt * 6) * dt;
+  }
 
-  const k = 0.014;
-  curEl  += (tgtEl  - curEl)  * k;
-  curR   += (tgtR   - curR)   * k;
-  curLx  += (tgtLx  - curLx)  * k;
-  curLy  += (tgtLy  - curLy)  * k;
-  curFov += (tgtFov - curFov) * k;
+  // 微細なハンドヘルドシェイク
+  const shakeX = Math.sin(t * 0.17) * 0.04 + (Math.random() - 0.5) * beatPulse * 0.02;
+  const shakeY = Math.sin(t * 0.23) * 0.03 + (Math.random() - 0.5) * beatPulse * 0.015;
 
-  // 球座標 → XYZ に変換してカメラ位置を計算
-  const azRad = orbitAz * Math.PI / 180;
-  const elRad = curEl * Math.PI / 180;
+  // 球座標 → XYZ
+  const azRad = camAz * Math.PI / 180;
+  const elRad = camEl * Math.PI / 180;
   const cosEl = Math.cos(elRad);
-  const bx = Math.sin(t * 0.17) * 0.04 + (Math.random() - 0.5) * beatPulse * 0.02;
-  const by = Math.sin(t * 0.23) * 0.03 + (Math.random() - 0.5) * beatPulse * 0.015;
   camera.position.set(
-    Math.sin(azRad) * cosEl * curR + bx,
-    Math.sin(elRad) * curR + 1.0   + by,
-    Math.cos(azRad) * cosEl * curR,
+    Math.sin(azRad) * cosEl * camR + shakeX,
+    Math.sin(elRad) * camR + 1.0   + shakeY,
+    Math.cos(azRad) * cosEl * camR,
   );
-  camera.lookAt(curLx, curLy + wordPulse * 0.06, 0);
-  camera.fov = curFov;
+  camera.lookAt(camLx, camLy + wordPulse * 0.06, 0);
+  camera.fov = camFov;
   camera.updateProjectionMatrix();
 
   renderer.render(scene, camera);
