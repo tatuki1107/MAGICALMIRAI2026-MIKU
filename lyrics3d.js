@@ -32,11 +32,14 @@ new ResizeObserver(onResize).observe(canvas.parentElement || canvas);
 // ── Font preload ──────────────────────────────────────────────
 document.fonts.load("900 72px 'Noto Sans JP'").catch(() => {});
 
-// ── Visible-width at z=0 ─────────────────────────────────────
+// ── Visible dimensions at z=0 ────────────────────────────────
 function visibleWidth() {
-  // half-width = tan(fov/2) * distance * aspect
   const fovRad = camera.fov * (Math.PI / 180);
   return 2 * Math.tan(fovRad / 2) * camera.position.z * camera.aspect;
+}
+function visibleHeight() {
+  const fovRad = camera.fov * (Math.PI / 180);
+  return 2 * Math.tan(fovRad / 2) * camera.position.z;
 }
 
 // ── Easing ───────────────────────────────────────────────────
@@ -95,6 +98,71 @@ function makeTextMesh(text, { meshHeight = 1.6, glowColor = '#39c5bb', textColor
     blending: THREE.NormalBlending,
   });
   return { mesh: new THREE.Mesh(geo, mat), width: meshW, height: meshHeight };
+}
+
+// ── Vertical text mesh factory ───────────────────────────────
+const _LONG_VOWEL = new Set('ー');
+const _SMALL_KANA = new Set('っゃゅょぁぃぅぇぉッャュョァィゥェォ');
+const _PUNC_RIGHT = new Set('。、・');
+
+function makeVerticalTextMesh(text, { glowColor = '#39c5bb', textColor = '#ffffff' } = {}) {
+  const fs      = 76;
+  const font    = `900 ${fs}px 'Noto Sans JP','Hiragino Kaku Gothic ProN',sans-serif`;
+  const cell    = Math.ceil(fs * 1.15);
+  const padPx   = Math.ceil(fs * 0.35);
+  const chars   = [...text];
+  const W       = cell + padPx * 2;
+  const H       = chars.length * cell + padPx * 2;
+
+  const cvs     = document.createElement('canvas');
+  cvs.width = W; cvs.height = H;
+  const ctx     = cvs.getContext('2d');
+  ctx.font      = font;
+  ctx.textBaseline = 'middle';
+  ctx.textAlign    = 'center';
+  const cx = W / 2;
+
+  chars.forEach((ch, i) => {
+    const cy      = padPx + i * cell + cell / 2;
+    const isSmall = _SMALL_KANA.has(ch);
+    const isPunc  = _PUNC_RIGHT.has(ch);
+    const isLong  = _LONG_VOWEL.has(ch);
+    const ox      = (isSmall || isPunc) ?  cell * 0.18 : 0;
+    const oy      = (isSmall || isPunc) ? -cell * 0.18 : 0;
+
+    ctx.save();
+    if (isLong) {
+      ctx.translate(cx, cy);
+      ctx.rotate(Math.PI / 2);
+      ctx.shadowBlur  = 0;
+      ctx.strokeStyle = '#020810'; ctx.lineWidth = 7; ctx.lineJoin = 'round';
+      ctx.strokeText(ch, 0, 0);
+      ctx.shadowColor = glowColor; ctx.shadowBlur = 28;
+      ctx.fillStyle   = glowColor; ctx.fillText(ch, 0, 0);
+      ctx.shadowBlur  = 12; ctx.fillStyle = textColor; ctx.fillText(ch, 0, 0);
+      ctx.shadowBlur  = 0;  ctx.fillStyle = textColor; ctx.fillText(ch, 0, 0);
+    } else {
+      ctx.shadowBlur  = 0;
+      ctx.strokeStyle = '#020810'; ctx.lineWidth = 7; ctx.lineJoin = 'round';
+      ctx.strokeText(ch, cx + ox, cy + oy);
+      ctx.shadowColor = glowColor; ctx.shadowBlur = 28;
+      ctx.fillStyle   = glowColor; ctx.fillText(ch, cx + ox, cy + oy);
+      ctx.shadowBlur  = 12; ctx.fillStyle = textColor; ctx.fillText(ch, cx + ox, cy + oy);
+      ctx.shadowBlur  = 0;  ctx.fillStyle = textColor; ctx.fillText(ch, cx + ox, cy + oy);
+    }
+    ctx.restore();
+  });
+
+  const cellWorld  = 1.4;
+  const meshHeight = chars.length * cellWorld;
+  const meshWidth  = meshHeight * (W / H);
+  const geo = new THREE.PlaneGeometry(meshWidth, meshHeight);
+  const tex = new THREE.CanvasTexture(cvs);
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex, transparent: true, opacity: 0,
+    depthWrite: false, blending: THREE.NormalBlending,
+  });
+  return { mesh: new THREE.Mesh(geo, mat), width: meshWidth, height: meshHeight };
 }
 
 // ── Pattern definitions ───────────────────────────────────────
@@ -312,6 +380,26 @@ const P = {
       s.mesh.material.opacity = 1 - easeOut2(t);
     },
   },
+  /** VERTICAL: 縦書きで画面左端/右端にフェードイン・フェードアウト */
+  VERTICAL: {
+    init(s) {
+      s.side  = s.params.side ?? 1;
+      const halfW = visibleWidth() / 2;
+      s.baseX = s.side * (halfW - (s.params.meshWidth ?? 1) / 2 - 0.15);
+      s.mesh.position.set(s.baseX, 0, 0);
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      s.mesh.material.opacity = clamp(t * 2.5, 0, 1);
+    },
+    active(s, _t) {
+      s.mesh.material.opacity = 1;
+    },
+    out(s, t) {
+      s.mesh.material.opacity = 1 - easeOut2(t);
+    },
+  },
+
   /** SPIN: SpinIn — z軸1回転しながらフェードイン、正位置で止まる */
   SPIN: {
     init(s) {
@@ -360,25 +448,26 @@ function findLongestWord(unit) {
 
 // ── Section → Config resolver ────────────────────────────────
 let _dirToggle = 1;
+let _vertDir   = 1;
 const _ySlots  = [-1.2, 0, 1.2, -0.6, 0.6];
 let   _yIdx    = 0;
 let   _verseIdx = 0;
 let   _chorIdx  = 0;
 
-// Verse patterns: A2 と SPIN を交互に挟みながら7種類をローテーション
+// Verse patterns: 4フレーズに1回 VERTICAL を挟む
 const VERSE_CFGS = [
-  (dir, y) => ({ pat: 'A2',   exit: 'B1', meshH: 1.5, glow: '#39c5bb', params: { dir, y } }),
-  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
-  (_,   y) => ({ pat: 'A9',   exit: 'B2', meshH: 1.5, glow: '#4488ff', params: { y } }),
-  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#aaeeff', params: { y } }),
-  (_,   y) => ({ pat: 'A8',   exit: 'B6', meshH: 1.6, glow: '#aaeeff', params: { y } }),
-  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
-  (_,   y) => ({ pat: 'A10',  exit: 'B3', meshH: 1.5, glow: '#39c5bb', params: { y } }),
-  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#88ffee', params: { y } }),
-  (_,   y) => ({ pat: 'A7',   exit: 'B2', meshH: 1.5, glow: '#88ffee', params: { y } }),
-  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
-  (_,   y) => ({ pat: 'A5',   exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
-  (_,   y) => ({ pat: 'SPIN', exit: 'B6', meshH: 1.5, glow: '#4488ff', params: { y } }),
+  (dir, y) => ({ pat: 'A2',       exit: 'B1', meshH: 1.5, glow: '#39c5bb', params: { dir, y } }),
+  (_,   y) => ({ pat: 'SPIN',     exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (_,   y) => ({ pat: 'A9',       exit: 'B2', meshH: 1.5, glow: '#4488ff', params: { y } }),
+  ()       => ({ pat: 'VERTICAL', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { vertical: true } }),
+  (_,   y) => ({ pat: 'A8',       exit: 'B6', meshH: 1.6, glow: '#aaeeff', params: { y } }),
+  (_,   y) => ({ pat: 'SPIN',     exit: 'B6', meshH: 1.5, glow: '#aaeeff', params: { y } }),
+  (_,   y) => ({ pat: 'A10',      exit: 'B3', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  ()       => ({ pat: 'VERTICAL', exit: 'B6', meshH: 1.5, glow: '#4488ff', params: { vertical: true } }),
+  (_,   y) => ({ pat: 'A7',       exit: 'B2', meshH: 1.5, glow: '#88ffee', params: { y } }),
+  (_,   y) => ({ pat: 'SPIN',     exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (_,   y) => ({ pat: 'A5',       exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  ()       => ({ pat: 'VERTICAL', exit: 'B6', meshH: 1.5, glow: '#88ffee', params: { vertical: true } }),
 ];
 
 // Chorus patterns: 4種類をローテーション
@@ -459,16 +548,29 @@ function spawnPhrase(unit, songTimeMs) {
   const dur = unit.endTime - unit.startTime;
   const displayText = (cfg.params?.emphWord?.text ?? unit.text ?? '').toUpperCase();
 
-  const { mesh, width: mw, height: mh } = makeTextMesh(displayText, {
-    meshHeight: cfg.meshH,
-    glowColor:  cfg.glow,
-  });
+  let mesh, mw, mh;
+  if (cfg.params?.vertical) {
+    // 縦書き: 左右交互に配置
+    _vertDir = -_vertDir;
+    cfg.params.side = _vertDir;
+    ({ mesh, width: mw, height: mh } = makeVerticalTextMesh(displayText, { glowColor: cfg.glow }));
+    cfg.params.meshWidth = mw;
+  } else {
+    ({ mesh, width: mw, height: mh } = makeTextMesh(displayText, {
+      meshHeight: cfg.meshH,
+      glowColor:  cfg.glow,
+    }));
+  }
 
   scene.add(mesh);
 
-  // clampScale: max uniform scale so mesh width stays within 90% of screen
-  const maxAllowed = visibleWidth() * 0.9;
-  const clampScale = mw > maxAllowed ? maxAllowed / mw : 1;
+  // 幅・高さ両方で 90% に収まるよう clampScale を計算
+  const wAllow = visibleWidth()  * 0.9;
+  const hAllow = visibleHeight() * 0.9;
+  const clampScale = Math.min(
+    mw > wAllow ? wAllow / mw : 1,
+    mh > hAllow ? hAllow / mh : 1,
+  );
 
   const pat = P[cfg.pat] || P.A2;
   const s   = {
@@ -484,7 +586,8 @@ function spawnPhrase(unit, songTimeMs) {
     dead:    false,
     ghosts:  [],
     clampScale,
-    meshWidth: mw,
+    meshWidth:  mw,
+    meshHeight: mh,
   };
 
   pat.init(s);
@@ -527,8 +630,12 @@ let prevBeat = -1;
       if (t >= 1) { disposePhrase(s); continue; }
     }
 
-    // Clamp scale so mesh stays within 90% of visible width (recalc each frame for resize)
-    const liveClamp = Math.min(s.clampScale, visibleWidth() * 0.9 / s.meshWidth);
+    // Clamp scale so mesh stays within 90% of visible width and height (recalc each frame for resize)
+    const liveClamp = Math.min(
+      s.clampScale,
+      visibleWidth()  * 0.9 / s.meshWidth,
+      visibleHeight() * 0.9 / s.meshHeight,
+    );
     if (s.mesh.scale.x > liveClamp) s.mesh.scale.multiplyScalar(liveClamp / s.mesh.scale.x);
 
     updateGhosts(s);
