@@ -181,26 +181,39 @@ const _kp = {
 
 /**
  * キーポーズ補間ダンス
- * 拍4つごとに次ポーズへ easeOutCubic で遷移。膝バウンスは常時継続。
+ * セクションで緩急:
+ *   間奏(lyric.active=false) — ポーズ切り替え停止、軽く揺れるだけ
+ *   通常(Aメロ/Bメロ)       — 振幅 60%、4拍ごと切り替え
+ *   サビ(isChorus)          — 振幅 100%、2拍ごと切り替え
  */
 function tickProcedural(fig, t, beat, cho, L) {
   const r  = fig._rig;
   const mb = window.MusicBG || {};
   const bi = mb.beatIndex ?? 0;
 
-  // 4拍ごとにポーズ進行
-  if (_kp.beatBase < 0) _kp.beatBase = bi;
-  if (bi - _kp.beatBase >= 4) {
-    _kp.prev      = _kp.cur;
-    _kp.cur       = (_kp.cur + 1) % POSES.length;
-    _kp.beatBase  = bi;
-    _kp.transStart = performance.now();
+  const isInterlude = !L.phrase || !mb.lyric?.active;
+  const isChorus    = mb.isChorus;
+
+  // セクションで切り替え間隔を決定 (間奏はポーズ固定)
+  const beatInterval = isChorus ? 2 : 4;
+  // 振幅係数: 間奏=0、通常=0.6、サビ=1.0
+  const amp = isInterlude ? 0 : isChorus ? 1.0 : 0.6;
+
+  if (!isInterlude) {
+    if (_kp.beatBase < 0) _kp.beatBase = bi;
+    if (bi - _kp.beatBase >= beatInterval) {
+      _kp.prev       = _kp.cur;
+      _kp.cur        = (_kp.cur + 1) % POSES.length;
+      _kp.beatBase   = bi;
+      _kp.transStart = performance.now();
+    }
   }
 
   const e  = easeOutCubic(Math.min((performance.now() - _kp.transStart) / _kp.transDur, 1));
   const pA = POSES[_kp.prev];
   const pB = POSES[_kp.cur];
-  const lrp = (a, b) => a + (b - a) * e;
+  // amp=0 のときはニュートラル(ゼロ)へ、それ以外はポーズ間を補間
+  const lrp = (a, b) => (a + (b - a) * e) * amp;
 
   // 腕
   r.la.sh.rotation.x = lrp(pA.la.sh.x, pB.la.sh.x);
@@ -215,7 +228,7 @@ function tickProcedural(fig, t, beat, cho, L) {
   r.spine.rotation.x = lrp(pA.spine.x, pB.spine.x);
   r.hips.rotation.z  = lrp(pA.hips.z,  pB.hips.z);
   r.hips.rotation.y  = lrp(pA.hips.y,  pB.hips.y);
-  r.neck.rotation.y  = lrp(pA.neck.y,  pB.neck.y);
+  r.neck.rotation.y  = lrp(pA.neck.y,  pB.neck.y) + (isInterlude ? Math.sin(t * 0.7) * 0.1 : 0);
   r.neck.rotation.x  = lrp(pA.neck.x,  pB.neck.x);
 
   // 膝バウンス — 常時継続
@@ -223,8 +236,8 @@ function tickProcedural(fig, t, beat, cho, L) {
   r.ll.kn.rotation.x = Math.max(0, Math.sin(t * 4))           * kAmp;
   r.rl.kn.rotation.x = Math.max(0, Math.sin(t * 4 + Math.PI)) * kAmp;
 
-  // 体全体の小さなボブ
-  r.root.position.y = Math.abs(Math.sin(t * 4)) * 0.03;
+  // 体全体の小さなボブ (間奏はさらに穏やか)
+  r.root.position.y = Math.abs(Math.sin(t * 4)) * (isInterlude ? 0.012 : 0.03);
 
   // 色: サビで桃色へ、ビートで発光が強まる
   tmpCol.lerpColors(C_NORMAL, C_CHORUS, cho);
