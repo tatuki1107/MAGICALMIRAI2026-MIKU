@@ -274,6 +274,7 @@ let isProcedural = false;
 
 new GLTFLoader().load(
   './model.glb',
+  // './3D/test-animationn.glb',
   (gltf) => {
     figure = gltf.scene;
     const box3 = new THREE.Box3().setFromObject(figure);
@@ -306,23 +307,27 @@ let phraseAmt = 0, vocalAmt = 0;
 const clock = new THREE.Clock();
 
 // ── Camera shot system (spherical coords) ──────────────────
-// az: 方位角(deg), el: 仰角(deg), r: 距離, ly: lookAt Y, f: FOV
+// az: 方位角(deg), el: 仰角(deg), r: 距離, lx: lookAt X, ly: lookAt Y, f: FOV
+// lx>0 → モデルが画面左寄り、lx<0 → 右寄り (字幕との重複を避けやすい)
 const SHOTS = [
-  { az:   0, el:  5,  r: 4.2, ly: 1.0,  f: 36 }, // 0 FRONT
-  { az:   5, el: 38,  r: 4.6, ly: 0.85, f: 38 }, // 1 HIGH (俯瞰)
-  { az:   0, el:  8,  r: 1.9, ly: 1.58, f: 26 }, // 2 CLOSE (顔アップ)
-  { az: -55, el:  5,  r: 4.2, ly: 1.0,  f: 40 }, // 3 SIDE_L
-  { az:  55, el:  5,  r: 4.2, ly: 1.0,  f: 40 }, // 4 SIDE_R
-  { az: 175, el: 28,  r: 4.5, ly: 1.1,  f: 44 }, // 5 BACK (後ろ俯瞰)
+  { az:   0, el:  5,  r: 4.2, lx:  0.0, ly: 1.0,  f: 36 }, // 0 FRONT (中央)
+  { az:   5, el: 38,  r: 4.6, lx:  0.0, ly: 0.85, f: 38 }, // 1 HIGH (俯瞰)
+  { az:   0, el:  8,  r: 1.9, lx:  0.0, ly: 1.58, f: 26 }, // 2 CLOSE (顔アップ)
+  { az: -55, el:  5,  r: 4.2, lx:  0.0, ly: 1.0,  f: 40 }, // 3 SIDE_L
+  { az:  55, el:  5,  r: 4.2, lx:  0.0, ly: 1.0,  f: 40 }, // 4 SIDE_R
+  { az: 175, el: 28,  r: 4.5, lx:  0.0, ly: 1.1,  f: 44 }, // 5 BACK (後ろ俯瞰)
+  { az:   0, el:  8,  r: 4.0, lx:  1.3, ly: 1.0,  f: 38 }, // 6 LEFT_THIRD (モデル左寄り)
+  { az:   0, el:  8,  r: 4.0, lx: -1.3, ly: 1.0,  f: 38 }, // 7 RIGHT_THIRD (モデル右寄り)
 ];
-const VERSE_SEQ  = [0, 3, 1, 4, 2, 5, 0, 4];
-const CHORUS_SEQ = [0, 2, 5, 1, 4, 3];
+// 正面ど真ん中(0)が連続しないようにオフセットショットを間に挿入
+const VERSE_SEQ  = [6, 3, 7, 1, 6, 4, 7, 5, 6, 2, 7, 3];
+const CHORUS_SEQ = [6, 2, 7, 1, 6, 4, 7, 5];
 
 let shotSeqIdx    = 0;
 let prevPhraseIdx = -1;
 // 現在の球座標パラメータ (常に lerp で更新)
-let curAz  = 0, curEl  = 5,  curR  = 4.2, curLy  = 1.0, curFov  = 36;
-let tgtAz  = 0, tgtEl  = 5,  tgtR  = 4.2, tgtLy  = 1.0, tgtFov  = 36;
+let curAz  = 0, curEl  = 5,  curR  = 4.2, curLx  = 0.0, curLy  = 1.0, curFov  = 36;
+let tgtAz  = 0, tgtEl  = 5,  tgtR  = 4.2, tgtLx  = 0.0, tgtLy  = 1.0, tgtFov  = 36;
 
 (function animate() {
   requestAnimationFrame(animate);
@@ -397,6 +402,7 @@ let tgtAz  = 0, tgtEl  = 5,  tgtR  = 4.2, tgtLy  = 1.0, tgtFov  = 36;
     tgtAz  = shot.az;
     tgtEl  = shot.el;
     tgtR   = shot.r;
+    tgtLx  = shot.lx;
     tgtLy  = shot.ly;
     tgtFov = shot.f;
   }
@@ -406,6 +412,7 @@ let tgtAz  = 0, tgtEl  = 5,  tgtR  = 4.2, tgtLy  = 1.0, tgtFov  = 36;
   curAz  += azDiff * k;
   curEl  += (tgtEl  - curEl)  * k;
   curR   += (tgtR   - curR)   * k;
+  curLx  += (tgtLx  - curLx)  * k;
   curLy  += (tgtLy  - curLy)  * k;
   curFov += (tgtFov - curFov) * k;
 
@@ -420,7 +427,7 @@ let tgtAz  = 0, tgtEl  = 5,  tgtR  = 4.2, tgtLy  = 1.0, tgtFov  = 36;
     Math.sin(elRad) * curR + 1.0   + by,
     Math.cos(azRad) * cosEl * curR,
   );
-  camera.lookAt(0, curLy + wordPulse * 0.06, 0);
+  camera.lookAt(curLx, curLy + wordPulse * 0.06, 0);
   camera.fov = curFov;
   camera.updateProjectionMatrix();
 
