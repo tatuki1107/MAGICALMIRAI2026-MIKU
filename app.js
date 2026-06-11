@@ -33,8 +33,6 @@
     jump: $("#jump"),
     seek: $("#seek"),
     duration: $("#duration"),
-    volume: $("#volume"),
-    volumeVal: $("#volumeVal"),
     media: $("#media"),
   };
 
@@ -52,6 +50,7 @@
   const { Player, Ease } = window.TextAliveApp;
 
   let duration = 0;
+  let maxVocalAmplitude = 0;
   let isSeeking = false;
   let isLoadingSong = false;
   let loadSequence = 0;
@@ -67,8 +66,8 @@
     const nextPlayer = new Player({
       app: {
         token: APP_TOKEN,
-        appName: "TextAlive API Test Site",
-        appAuthor: "Codex",
+        appName: "TAKEOVER Lyric Stage",
+        appAuthor: "Takumin",
         parameters: [
           {
             title: "文字サイズ",
@@ -130,6 +129,7 @@
         setStatus("一時停止", "ready");
         addEvent("pause");
         if (window.MusicBG) window.MusicBG.isPlaying = false;
+        resetLyricState();
       },
       onStop: () => {
         if (generation !== playerGeneration) {
@@ -139,6 +139,7 @@
         addEvent("stop");
         updatePosition(0);
         if (window.MusicBG) window.MusicBG.isPlaying = false;
+        resetLyricState();
       },
       onTimeUpdate: (position) => {
         if (generation === playerGeneration) {
@@ -154,12 +155,6 @@
 
     return nextPlayer;
   }
-
-  elements.volume.addEventListener("input", () => {
-    const v = Number(elements.volume.value);
-    elements.volumeVal.textContent = v;
-    if (player) player.requestVolume(v);
-  });
 
   elements.play.addEventListener("click", () => {
     if (player.video) {
@@ -361,6 +356,8 @@
     assignAnimation(video.firstWord, animateWord);
     assignAnimation(video.firstChar, animateChar);
 
+    maxVocalAmplitude = safe(() => player.getMaxVocalAmplitude()) || 0;
+
     const song = player.data && player.data.song;
     elements.songTitle.textContent = song && song.name ? song.name : "-";
     elements.artistName.textContent =
@@ -378,7 +375,7 @@
 
   function onTimerReady() {
     disableTransport(false);
-    player.requestVolume(Number(elements.volume.value));
+    player.requestVolume(8);
     setStatus("再生準備完了", "ready");
     addEvent("timer ready");
   }
@@ -387,6 +384,41 @@
     updatePosition(position);
     updateBeat(position);
     updateHarmony(position);
+    updateLyricState(position);
+  }
+
+  // 歌詞の発声状態を MusicBG バスへ公開 (dancer.js が動きの生成に使う)
+  function updateLyricState(position) {
+    const mb = window.MusicBG;
+    if (!mb) return;
+    const lyric = mb.lyric || (mb.lyric = {});
+    const video = player.video;
+
+    const phrase = video ? safe(() => video.findPhrase(position)) : null;
+    const word = video ? safe(() => video.findWord(position)) : null;
+    const char = video ? safe(() => video.findChar(position)) : null;
+
+    lyric.active = !!phrase;
+    lyric.progress = phrase ? clamp01(phrase.progress(position)) : 0;
+    lyric.wordStart = word ? word.startTime : -1;
+    lyric.charStart = char ? char.startTime : -1;
+
+    if (maxVocalAmplitude > 0) {
+      const amp = safe(() => player.getVocalAmplitude(position));
+      lyric.vocal = clamp01((amp || 0) / maxVocalAmplitude);
+    } else {
+      lyric.vocal = lyric.active ? 0.6 : 0;
+    }
+  }
+
+  function resetLyricState() {
+    const lyric = window.MusicBG && window.MusicBG.lyric;
+    if (!lyric) return;
+    lyric.active = false;
+    lyric.progress = 0;
+    lyric.wordStart = -1;
+    lyric.charStart = -1;
+    lyric.vocal = 0;
   }
 
   function animatePhrase(now, unit) {
@@ -399,6 +431,7 @@
 
     if (unit.text !== lastPhraseText) {
       lastPhraseText = unit.text;
+      if (window.MusicBG) window.MusicBG.phraseIndex = (window.MusicBG.phraseIndex || 0) + 1;
       if (window.Lyrics3D) {
         window.Lyrics3D.onPhrase(unit, now);
       }
@@ -485,6 +518,8 @@
 
   function resetLyrics() {
     duration = 0;
+    maxVocalAmplitude = 0;
+    resetLyricState();
     lastPhraseText = "";
     lastWordText = "";
     lastCharText = "";

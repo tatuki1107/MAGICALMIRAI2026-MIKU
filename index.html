@@ -65,11 +65,6 @@
             </span>
           </div>
 
-          <div class="volume-row">
-            <label for="volume">🔊</label>
-            <input id="volume" type="range" min="0" max="100" value="30" step="1" />
-            <span id="volumeVal">30</span>
-          </div>
         </div>
       </footer>
     </div>
@@ -89,10 +84,16 @@
 
     <script>
       // Initialize shared state before any other script runs
-      window.MusicBG = { beatProgress: 0, beatIndex: -1, isChorus: false, isPlaying: false };
+      window.MusicBG = {
+        beatProgress: 0,
+        beatIndex: -1,
+        isChorus: false,
+        isPlaying: false,
+        lyric: { active: false, progress: 0, wordStart: -1, charStart: -1, vocal: 0 },
+      };
     </script>
-    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
-    <script src="https://unpkg.com/textalive-app-api/dist/index.js"></script>
+    <script src="https://unpkg.com/axios@1.17.0/dist/axios.min.js"></script>
+    <script src="https://unpkg.com/textalive-app-api@0.4.0/dist/index.js"></script>
     <script src="./app.js"></script>
     <script type="module" src="./bg.js"></script>
     <script type="module" src="./dancer.js"></script>

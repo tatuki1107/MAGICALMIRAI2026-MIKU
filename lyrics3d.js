@@ -174,11 +174,113 @@ const P = {
       s.mesh.scale.setScalar(1 + t * 0.45);
     },
   },
+
+  /** A7: DropIn — 上から落下してバウンド */
+  A7: {
+    init(s) {
+      s.baseY = s.params.y ?? 0;
+      s.mesh.position.set(s.params.x ?? 0, s.baseY + 4.5, s.params.z ?? 0);
+    },
+    in(s, t) {
+      s.mesh.position.y       = s.baseY + 4.5 * (1 - spring(clamp(t * 1.3, 0, 1)));
+      s.mesh.material.opacity = clamp(t * 4, 0, 1);
+    },
+    active(s, _t, mb) {
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.09);
+    },
+    out(s, t) {
+      s.mesh.position.y      -= t * 4.5;
+      s.mesh.material.opacity = 1 - easeOut2(t);
+    },
+  },
+
+  /** A8: GlitchFlash — グリッチで点滅しながら出現 */
+  A8: {
+    init(s) {
+      s.baseX = s.params.x ?? 0;
+      s.baseY = s.params.y ?? 0;
+      s.mesh.position.set(s.baseX, s.baseY, 0);
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      const flicker = t < 0.65 ? (Math.floor(t * 14) % 2) : 1;
+      s.mesh.material.opacity = flicker;
+      if (t < 0.65) {
+        s.mesh.position.x = s.baseX + (Math.random() - 0.5) * 0.45 * (1 - t);
+        s.mesh.position.y = s.baseY + (Math.random() - 0.5) * 0.18;
+        s.mesh.scale.setScalar(0.92 + Math.random() * 0.16 * (1 - t));
+      } else {
+        s.mesh.position.x += (s.baseX - s.mesh.position.x) * 0.4;
+        s.mesh.position.y += (s.baseY - s.mesh.position.y) * 0.4;
+        s.mesh.scale.setScalar(1);
+        s.mesh.material.opacity = 1;
+      }
+    },
+    active(s, _t, mb) {
+      s.mesh.material.opacity = 0.96;
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.1);
+      if (Math.random() < 0.025) {
+        s.mesh.position.x = s.baseX + (Math.random() - 0.5) * 0.12;
+      } else {
+        s.mesh.position.x += (s.baseX - s.mesh.position.x) * 0.35;
+      }
+    },
+    out(s, t) {
+      s.mesh.material.opacity = 1 - t;
+      if (Math.random() < 0.08) s.mesh.position.x = s.baseX + (Math.random() - 0.5) * 0.3;
+    },
+  },
+
+  /** A9: SlideUp — 下から滑り上がる */
+  A9: {
+    init(s) {
+      s.baseY = s.params.y ?? 0;
+      s.mesh.position.set(s.params.x ?? 0, s.baseY - 3.8, s.params.z ?? 0);
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      s.mesh.position.y       = s.baseY - 3.8 * (1 - easeOut4(t));
+      s.mesh.material.opacity = clamp(t * 2.8, 0, 1);
+    },
+    active(s, _t, mb) {
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.08);
+    },
+    out(s, t) {
+      s.mesh.position.y      += t * 3.5;
+      s.mesh.material.opacity = 1 - easeOut2(t);
+    },
+  },
+
+  /** A10: TwistIn — 薄い板から展開する */
+  A10: {
+    init(s) {
+      s.baseY = s.params.y ?? 0;
+      s.mesh.position.set(s.params.x ?? 0, s.baseY, 0);
+      s.mesh.scale.set(1.35, 0.01, 1);
+      s.mesh.material.opacity = 0;
+    },
+    in(s, t) {
+      const e = spring(clamp(t * 1.4, 0, 1));
+      s.mesh.scale.set(1.35 - e * 0.35, clamp(e, 0.01, 1), 1);
+      s.mesh.material.opacity = clamp(t * 3, 0, 1);
+    },
+    active(s, _t, mb) {
+      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.1);
+    },
+    out(s, t) {
+      s.mesh.scale.set(1 + t * 0.3, clamp(1 - t * 1.6, 0.01, 1), 1);
+      s.mesh.material.opacity = 1 - easeOut2(t);
+    },
+  },
 };
 
 // Exit patterns
 const EXIT = {
-  B1: (s, t) => { s.mesh.position.z -= t * 9; s.mesh.material.opacity = 1 - easeOut2(t); },
+  B1: (s, t) => { s.mesh.position.z -= t * 9;   s.mesh.material.opacity = 1 - easeOut2(t); },
+  B2: (s, t) => { s.mesh.position.y -= t * 4.5; s.mesh.material.opacity = 1 - easeOut2(t); },
+  B3: (s, t) => { s.mesh.scale.setScalar(1 - easeOut2(t)); s.mesh.material.opacity = 1 - t; },
+  B4: (s, t) => { s.mesh.position.x += t * 6;   s.mesh.material.opacity = 1 - easeOut2(t); },
+  B5: (s, t) => { s.mesh.position.x -= t * 6;   s.mesh.material.opacity = 1 - easeOut2(t); },
   B6: (s, t) => { s.mesh.material.opacity = 1 - t; },
 };
 
@@ -186,19 +288,38 @@ const EXIT = {
 let _dirToggle = 1;
 const _ySlots  = [-1.2, 0, 1.2, -0.6, 0.6];
 let   _yIdx    = 0;
+let   _verseIdx = 0;
+let   _chorIdx  = 0;
+
+// Verse patterns: 6種類をローテーション
+const VERSE_CFGS = [
+  (dir, y) => ({ pat: 'A2',  exit: 'B1', meshH: 1.5, glow: '#39c5bb', params: { dir, y } }),
+  (_,   y) => ({ pat: 'A9',  exit: 'B2', meshH: 1.5, glow: '#4488ff', params: { y } }),
+  (_,   y) => ({ pat: 'A8',  exit: 'B6', meshH: 1.6, glow: '#aaeeff', params: { y } }),
+  (_,   y) => ({ pat: 'A10', exit: 'B3', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+  (_,   y) => ({ pat: 'A7',  exit: 'B2', meshH: 1.5, glow: '#88ffee', params: { y } }),
+  (_,   y) => ({ pat: 'A5',  exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
+];
+
+// Chorus patterns: 4種類をローテーション
+const CHORUS_CFGS = [
+  () => ({ pat: 'A6',  exit: 'B1', meshH: 2.2, glow: '#ff70cc', params: { y: 0 } }),
+  () => ({ pat: 'A3',  exit: 'B3', meshH: 2.0, glow: '#ff70cc', params: { y: 0 } }),
+  () => ({ pat: 'A7',  exit: 'B1', meshH: 2.2, glow: '#ffd166', params: { y: 0 } }),
+  () => ({ pat: 'A10', exit: 'B3', meshH: 2.0, glow: '#ff88cc', params: { y: 0 } }),
+];
 
 function resolveConfig(mb, songTime) {
   if (songTime < 12000) {                              // イントロ
     return { pat: 'A5', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y: 0 } };
   }
   if (mb.isChorus) {                                   // サビ
-    _dirToggle = 1;
-    return { pat: 'A6', exit: 'B1', meshH: 2.2, glow: '#ff70cc', params: { y: 0 } };
+    return CHORUS_CFGS[_chorIdx++ % CHORUS_CFGS.length]();
   }
   // Aメロ・Bメロ
   _dirToggle = -_dirToggle;
-  const y    = _ySlots[_yIdx++ % _ySlots.length];
-  return { pat: 'A2', exit: 'B1', meshH: 1.5, glow: '#39c5bb', params: { dir: _dirToggle, y } };
+  const y = _ySlots[_yIdx++ % _ySlots.length];
+  return VERSE_CFGS[_verseIdx++ % VERSE_CFGS.length](_dirToggle, y);
 }
 
 // ── Ghost trail ───────────────────────────────────────────────
@@ -254,7 +375,7 @@ function spawnPhrase(unit, songTimeMs) {
   const cfg = resolveConfig(mb, songTimeMs);
   const dur = unit.endTime - unit.startTime;
 
-  const { mesh, width: mw, height: mh } = makeTextMesh(unit.text || '', {
+  const { mesh, width: mw, height: mh } = makeTextMesh((unit.text || '').toUpperCase(), {
     meshHeight: cfg.meshH,
     glowColor:  cfg.glow,
   });
