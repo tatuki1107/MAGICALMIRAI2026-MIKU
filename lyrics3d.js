@@ -467,7 +467,7 @@ function spawnPhrase(unit, songTimeMs) {
     depthWrite: false,
   });
   const scrim = new THREE.Mesh(
-    new THREE.PlaneGeometry(mw + 0.6, mh + 0.35),
+    new THREE.PlaneGeometry(mw + 0.9, mh + 0.55),
     scrimMat,
   );
   scrim.position.z = -0.04;
@@ -542,7 +542,7 @@ let prevBeat = -1;
     if (s.mesh.scale.x > liveClamp) s.mesh.scale.multiplyScalar(liveClamp / s.mesh.scale.x);
 
     // Sync scrim opacity with text opacity
-    if (s.scrimMat) s.scrimMat.opacity = s.mesh.material.opacity * 0.52;
+    if (s.scrimMat) s.scrimMat.opacity = s.mesh.material.opacity * 0.70;
 
     updateGhosts(s);
   }
