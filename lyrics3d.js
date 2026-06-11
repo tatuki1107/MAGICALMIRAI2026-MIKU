@@ -64,6 +64,12 @@ function makeTextMesh(text, { meshHeight = 1.6, glowColor = '#39c5bb', textColor
   ctx.textBaseline  = 'middle';
   ctx.textAlign     = 'left';
 
+  // Dark outline (legibility without scrim)
+  ctx.shadowBlur    = 0;
+  ctx.strokeStyle   = '#020810';
+  ctx.lineWidth     = 7;
+  ctx.lineJoin      = 'round';
+  ctx.strokeText(text, pad, H / 2);
   // Outer glow
   ctx.shadowColor = glowColor;
   ctx.shadowBlur  = 28;
@@ -407,7 +413,7 @@ function addGhosts(s) {
   s.ghosts = [];
   for (let i = 0; i < GHOST_N; i++) {
     const g  = s.mesh.clone();
-    // Remove scrim child — ghosts don't need backing panels
+    // Remove mesh children — ghosts don't need them
     while (g.children.length > 0) g.remove(g.children[0]);
     g.material = s.mesh.material.clone();
     g.material.opacity = 0;
@@ -440,7 +446,6 @@ function disposePhrase(s) {
   s.mesh.geometry.dispose();
   s.mesh.material.map?.dispose();
   s.mesh.material.dispose();
-  s.scrimMat?.dispose();
   s.ghosts.forEach(g => { scene.remove(g); g.material.dispose(); });
   s.dead = true;
 }
@@ -459,20 +464,6 @@ function spawnPhrase(unit, songTimeMs) {
     glowColor:  cfg.glow,
   });
 
-  // Dark scrim behind text for readability
-  const scrimMat = new THREE.MeshBasicMaterial({
-    color: 0x020810,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-  });
-  const scrim = new THREE.Mesh(
-    new THREE.PlaneGeometry(mw + 0.9, mh + 0.55),
-    scrimMat,
-  );
-  scrim.position.z = -0.04;
-  mesh.add(scrim);
-
   scene.add(mesh);
 
   // clampScale: max uniform scale so mesh width stays within 90% of screen
@@ -482,7 +473,6 @@ function spawnPhrase(unit, songTimeMs) {
   const pat = P[cfg.pat] || P.A2;
   const s   = {
     mesh,
-    scrimMat,
     pattern: pat,
     exitFn:  EXIT[cfg.exit] || EXIT.B6,
     params:  cfg.params || {},
@@ -540,9 +530,6 @@ let prevBeat = -1;
     // Clamp scale so mesh stays within 90% of visible width (recalc each frame for resize)
     const liveClamp = Math.min(s.clampScale, visibleWidth() * 0.9 / s.meshWidth);
     if (s.mesh.scale.x > liveClamp) s.mesh.scale.multiplyScalar(liveClamp / s.mesh.scale.x);
-
-    // Sync scrim opacity with text opacity
-    if (s.scrimMat) s.scrimMat.opacity = s.mesh.material.opacity * 0.70;
 
     updateGhosts(s);
   }
