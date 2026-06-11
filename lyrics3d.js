@@ -32,6 +32,13 @@ new ResizeObserver(onResize).observe(canvas.parentElement || canvas);
 // ── Font preload ──────────────────────────────────────────────
 document.fonts.load("900 72px 'Noto Sans JP'").catch(() => {});
 
+// ── Visible-width at z=0 ─────────────────────────────────────
+function visibleWidth() {
+  // half-width = tan(fov/2) * distance * aspect
+  const fovRad = camera.fov * (Math.PI / 180);
+  return 2 * Math.tan(fovRad / 2) * camera.position.z * camera.aspect;
+}
+
 // ── Easing ───────────────────────────────────────────────────
 const easeOut2 = t => 1 - (1 - t) ** 2;
 const easeOut4 = t => 1 - (1 - t) ** 4;
@@ -441,6 +448,10 @@ function spawnPhrase(unit, songTimeMs) {
 
   scene.add(mesh);
 
+  // clampScale: max uniform scale so mesh width stays within 90% of screen
+  const maxAllowed = visibleWidth() * 0.9;
+  const clampScale = mw > maxAllowed ? maxAllowed / mw : 1;
+
   const pat = P[cfg.pat] || P.A2;
   const s   = {
     mesh,
@@ -455,6 +466,8 @@ function spawnPhrase(unit, songTimeMs) {
     t0:      performance.now(),
     dead:    false,
     ghosts:  [],
+    clampScale,
+    meshWidth: mw,
   };
 
   pat.init(s);
@@ -496,6 +509,10 @@ let prevBeat = -1;
       s.exitFn(s, t);
       if (t >= 1) { disposePhrase(s); continue; }
     }
+
+    // Clamp scale so mesh stays within 90% of visible width (recalc each frame for resize)
+    const liveClamp = Math.min(s.clampScale, visibleWidth() * 0.9 / s.meshWidth);
+    if (s.mesh.scale.x > liveClamp) s.mesh.scale.multiplyScalar(liveClamp / s.mesh.scale.x);
 
     // Sync scrim opacity with text opacity
     if (s.scrimMat) s.scrimMat.opacity = s.mesh.material.opacity * 0.52;
