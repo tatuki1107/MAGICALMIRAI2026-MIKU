@@ -123,59 +123,115 @@ const C_CHORUS = new THREE.Color(0xff70cc);
 const tmpCol = new THREE.Color();
 const tmpEm  = new THREE.Color();
 
+// ── Keypose interpolation system ─────────────────────────────
+const easeOutCubic = t => 1 - (1 - t) ** 3;
+
+// 各ポーズ: la/ra = { sh:{x,z}, el:{x} }, spine/hips/neck = {x,y,z}
+// la = side:1(右腕), ra = side:-1(左腕)
+const POSES = [
+  // 0: 片手挙げ (la=右腕を上げる)
+  {
+    la:    { sh: { x: -2.2, z:  0.20 }, el: { x: 0.20 } },
+    ra:    { sh: { x: -0.1, z: -0.20 }, el: { x: 0.10 } },
+    spine: { z:  0.05, x:  0.00 },
+    hips:  { z:  0.05, y:  0.00 },
+    neck:  { y:  0.15, x:  0.00 },
+  },
+  // 1: 胸の前で両手
+  {
+    la:    { sh: { x: -0.90, z:  0.30 }, el: { x: 1.10 } },
+    ra:    { sh: { x: -0.90, z: -0.30 }, el: { x: 1.10 } },
+    spine: { z:  0.00, x:  0.05 },
+    hips:  { z:  0.00, y:  0.00 },
+    neck:  { y:  0.00, x: -0.10 },
+  },
+  // 2: 手を横に流す
+  {
+    la:    { sh: { x:  0.00, z:  1.20 }, el: { x: 0.10 } },
+    ra:    { sh: { x:  0.00, z: -1.20 }, el: { x: 0.10 } },
+    spine: { z:  0.00, x:  0.00 },
+    hips:  { z:  0.08, y:  0.12 },
+    neck:  { y:  0.15, x:  0.00 },
+  },
+  // 3: 腰に手
+  {
+    la:    { sh: { x:  0.40, z:  0.65 }, el: { x: 1.40 } },
+    ra:    { sh: { x:  0.40, z: -0.65 }, el: { x: 1.40 } },
+    spine: { z:  0.00, x: -0.05 },
+    hips:  { z:  0.00, y:  0.00 },
+    neck:  { y:  0.00, x:  0.08 },
+  },
+  // 4: 指差し (la=右腕を前に伸ばす)
+  {
+    la:    { sh: { x: -1.40, z:  0.10 }, el: { x: 0.00 } },
+    ra:    { sh: { x: -0.20, z: -0.18 }, el: { x: 0.25 } },
+    spine: { z: -0.08, x:  0.00 },
+    hips:  { z: -0.05, y: -0.12 },
+    neck:  { y: -0.20, x: -0.05 },
+  },
+];
+
+const _kp = {
+  cur:        0,
+  prev:       0,
+  beatBase:   -1,
+  transStart: 0,
+  transDur:   220, // ms — 素早く移行してピタッと止める
+};
+
 /**
- * 歌詞同期ダンス
- * L = { phrase: 発声中量0..1, progress: フレーズ進行0..1,
- *       word: 単語アクセント1→0, charTick: 文字アクセント1→0,
- *       side: 腕の左右 ±1, vocal: 声量0..1 }
+ * キーポーズ補間ダンス
+ * 拍4つごとに次ポーズへ easeOutCubic で遷移。膝バウンスは常時継続。
  */
 function tickProcedural(fig, t, beat, cho, L) {
-  const r = fig._rig;
-  // 歌っている間ほど運動量が上がり、間奏は静かに揺れる
-  const energy = 0.35 + L.phrase * 0.4 + L.vocal * 0.45 + cho * 0.3;
-  const sp = 1.1 + cho * 0.5;
+  const r  = fig._rig;
+  const mb = window.MusicBG || {};
+  const bi = mb.beatIndex ?? 0;
 
-  // 拍のバウンス (声量で振幅が変わる)
-  r.root.position.y = Math.abs(Math.sin(t * sp * 2)) * 0.055 * energy - 0.02;
+  // 4拍ごとにポーズ進行
+  if (_kp.beatBase < 0) _kp.beatBase = bi;
+  if (bi - _kp.beatBase >= 4) {
+    _kp.prev      = _kp.cur;
+    _kp.cur       = (_kp.cur + 1) % POSES.length;
+    _kp.beatBase  = bi;
+    _kp.transStart = performance.now();
+  }
 
-  // フレーズの進行に合わせて体が左右へ大きくスイング
-  const sweep = Math.sin(L.progress * Math.PI * 2) * L.phrase;
-  r.hips.rotation.z  = Math.sin(t * sp) * 0.07 * energy + sweep * 0.1;
-  r.hips.rotation.y  = Math.sin(t * sp * 0.5) * 0.07 * energy + sweep * 0.2;
-  r.spine.rotation.z = -sweep * 0.13 - Math.sin(t * sp + 0.3) * 0.04 * energy;
-  r.spine.rotation.x = Math.sin(t * sp * 0.7) * 0.04 * energy;
+  const e  = easeOutCubic(Math.min((performance.now() - _kp.transStart) / _kp.transDur, 1));
+  const pA = POSES[_kp.prev];
+  const pB = POSES[_kp.cur];
+  const lrp = (a, b) => a + (b - a) * e;
 
-  // 単語の頭で首を振り、文字の刻みで小さくうなずく
-  r.neck.rotation.y = L.side * L.word * 0.3 + Math.sin(t * sp * 1.3) * 0.12 * energy;
-  r.neck.rotation.x = -L.word * 0.1 + L.charTick * 0.08 + Math.sin(t * sp * 0.9) * 0.05;
+  // 腕
+  r.la.sh.rotation.x = lrp(pA.la.sh.x, pB.la.sh.x);
+  r.la.sh.rotation.z = lrp(pA.la.sh.z, pB.la.sh.z);
+  r.la.el.rotation.x = lrp(pA.la.el.x, pB.la.el.x);
+  r.ra.sh.rotation.x = lrp(pA.ra.sh.x, pB.ra.sh.x);
+  r.ra.sh.rotation.z = lrp(pA.ra.sh.z, pB.ra.sh.z);
+  r.ra.el.rotation.x = lrp(pA.ra.el.x, pB.ra.el.x);
 
-  // 腕: 単語ごとに左右交互に突き上げ、歌っていない間はゆったり揺れる
-  const idle = Math.sin(t * sp) * 0.5 * energy;
-  const lift = L.word * (1.7 + cho * 0.6);
-  const up   = L.side > 0 ? r.la : r.ra;
-  const dn   = L.side > 0 ? r.ra : r.la;
-  const sgn  = L.side > 0 ? 1 : -1;
+  // 体幹・首
+  r.spine.rotation.z = lrp(pA.spine.z, pB.spine.z);
+  r.spine.rotation.x = lrp(pA.spine.x, pB.spine.x);
+  r.hips.rotation.z  = lrp(pA.hips.z,  pB.hips.z);
+  r.hips.rotation.y  = lrp(pA.hips.y,  pB.hips.y);
+  r.neck.rotation.y  = lrp(pA.neck.y,  pB.neck.y);
+  r.neck.rotation.x  = lrp(pA.neck.x,  pB.neck.x);
 
-  up.sh.rotation.x = damp(up.sh.rotation.x, -lift + idle * (1 - L.word) * 0.6, 0.3);
-  up.sh.rotation.z = damp(up.sh.rotation.z, sgn * (0.22 + L.word * 0.55), 0.3);
-  up.el.rotation.x = damp(up.el.rotation.x, L.word * 0.5 + Math.max(0, idle) * (1 - L.word), 0.3);
+  // 膝バウンス — 常時継続
+  const kAmp = 0.18 + beat * 0.10;
+  r.ll.kn.rotation.x = Math.max(0, Math.sin(t * 4))           * kAmp;
+  r.rl.kn.rotation.x = Math.max(0, Math.sin(t * 4 + Math.PI)) * kAmp;
 
-  dn.sh.rotation.x = damp(dn.sh.rotation.x, -idle * 0.6, 0.2);
-  dn.sh.rotation.z = damp(dn.sh.rotation.z, -sgn * 0.22, 0.2);
-  dn.el.rotation.x = damp(dn.el.rotation.x, Math.max(0, -idle) * 0.7, 0.2);
+  // 体全体の小さなボブ
+  r.root.position.y = Math.abs(Math.sin(t * 4)) * 0.03;
 
-  // 足は拍でステップ、運動量に追従
-  r.ll.hip.rotation.x = Math.sin(t * sp) * 0.42 * energy;
-  r.rl.hip.rotation.x = Math.sin(t * sp + Math.PI) * 0.42 * energy;
-  r.ll.kn.rotation.x = Math.max(0, Math.sin(t * sp + Math.PI * 0.5)) * 0.5 * energy;
-  r.rl.kn.rotation.x = Math.max(0, Math.sin(t * sp + Math.PI * 1.5)) * 0.5 * energy;
-
-  // 色: サビで桃色へ、単語アクセントで発光が強まる
+  // 色: サビで桃色へ、ビートで発光が強まる
   tmpCol.lerpColors(C_NORMAL, C_CHORUS, cho);
-  tmpEm.copy(tmpCol).multiplyScalar(0.2 + L.word * 0.4 + beat * 0.15);
+  tmpEm.copy(tmpCol).multiplyScalar(0.2 + beat * 0.35);
   fig._mats.forEach(m => { m.color.copy(tmpCol); m.emissive.copy(tmpEm); });
 
-  fig.scale.setScalar(1 + beat * 0.04 + L.word * 0.05);
+  fig.scale.setScalar(1 + beat * 0.04);
 }
 
 // ── GLTF loading ─────────────────────────────────────────────
