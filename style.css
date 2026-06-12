@@ -50,6 +50,535 @@ input {
   display: block;
 }
 
+.typography-layer {
+  position: absolute;
+  inset: 72px 0 82px;
+  z-index: 7;
+  overflow: hidden;
+  pointer-events: none;
+  contain: layout paint;
+  isolation: isolate;
+}
+
+.pv-phrase,
+.pv-word-hit,
+.pv-char-tick {
+  position: absolute;
+  letter-spacing: 0;
+  text-rendering: geometricPrecision;
+  will-change: transform, opacity, clip-path;
+}
+
+.pv-phrase {
+  --pv-main: #f7fffd;
+  --pv-shadow: rgba(57, 197, 187, 0.7);
+  --pv-bg: rgba(57, 197, 187, 0.92);
+  z-index: 2;
+  color: var(--pv-main);
+  font-weight: 900;
+  line-height: 0.96;
+  filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.46));
+  animation: pvPhraseHold var(--pv-duration, 3200ms) linear both;
+}
+
+.pv-phrase.is-exiting {
+  animation: pvExit 320ms ease forwards;
+}
+
+.pv-mask {
+  position: relative;
+  display: inline-block;
+  padding: 0.1em 0.18em 0.16em;
+  overflow: hidden;
+  clip-path: inset(0 100% 0 0);
+  animation: pvMaskSweep 620ms cubic-bezier(0.2, 0.85, 0.14, 1) forwards;
+}
+
+.pv-mask::before {
+  content: "";
+  position: absolute;
+  inset: 0.12em 0;
+  z-index: -1;
+  background: linear-gradient(90deg, var(--pv-bg), rgba(0, 3, 8, 0.08));
+  transform: skewX(-12deg) scaleX(0.94);
+  transform-origin: left center;
+  opacity: 0.88;
+}
+
+.pv-text {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  max-width: min(14ch, 58rem);
+  -webkit-text-stroke: 0.045em rgba(0, 3, 8, 0.88);
+  text-shadow:
+    0 0 1px rgba(0, 3, 8, 0.96),
+    0 0 18px var(--pv-shadow),
+    0 8px 0 rgba(0, 3, 8, 0.5);
+}
+
+.pv-char {
+  display: inline-block;
+  min-width: 0.18em;
+  transform-origin: center 72%;
+  animation: pvCharPop 560ms cubic-bezier(0.2, 0.9, 0.16, 1.14) both;
+  animation-delay: calc(var(--i) * 31ms);
+}
+
+.pv-short,
+.pv-short .pv-text {
+  font-size: 5.1rem;
+}
+
+.pv-medium,
+.pv-medium .pv-text {
+  font-size: 4rem;
+}
+
+.pv-long,
+.pv-long .pv-text {
+  font-size: 2.85rem;
+}
+
+.pv-long .pv-text {
+  line-height: 1.04;
+}
+
+.pv-phrase.is-chorus .pv-text {
+  filter: saturate(1.25) brightness(1.08);
+}
+
+.tone-cyan {
+  --pv-main: #ecfffb;
+  --pv-shadow: rgba(57, 197, 187, 0.78);
+  --pv-bg: rgba(57, 197, 187, 0.86);
+}
+
+.tone-hot {
+  --pv-main: #fff0f8;
+  --pv-shadow: rgba(255, 92, 168, 0.76);
+  --pv-bg: rgba(255, 92, 168, 0.88);
+}
+
+.tone-warm {
+  --pv-main: #fff7d9;
+  --pv-shadow: rgba(255, 209, 102, 0.72);
+  --pv-bg: rgba(255, 209, 102, 0.88);
+}
+
+.tone-white {
+  --pv-main: #ffffff;
+  --pv-shadow: rgba(185, 255, 245, 0.64);
+  --pv-bg: rgba(247, 255, 253, 0.78);
+}
+
+.pv-slide {
+  left: 4%;
+  bottom: 12%;
+  max-width: min(58rem, 68%);
+  transform: translateX(-16px);
+  animation: pvSlideDrift var(--pv-duration, 3200ms) ease-out both;
+}
+
+.pv-vertical {
+  right: 7%;
+  top: 5%;
+  transform: translateY(-14px);
+}
+
+.pv-vertical .pv-mask {
+  clip-path: inset(0 0 100% 0);
+  animation-name: pvMaskDrop;
+}
+
+.pv-vertical .pv-mask::before {
+  inset: 0 0.1em;
+  background: linear-gradient(180deg, var(--pv-bg), rgba(0, 3, 8, 0.08));
+  transform: skewY(-8deg);
+}
+
+.pv-vertical .pv-text {
+  display: block;
+  max-width: 10rem;
+  max-height: 27rem;
+  writing-mode: vertical-rl;
+}
+
+.pv-burst {
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.pv-burst .pv-mask::before {
+  inset: 0.2em -0.42em;
+  background:
+    linear-gradient(90deg, rgba(0, 3, 8, 0.82), rgba(0, 3, 8, 0.15)),
+    linear-gradient(90deg, var(--pv-bg), rgba(255, 255, 255, 0.12));
+}
+
+.pv-burst .pv-text {
+  justify-content: center;
+  max-width: 12ch;
+  transform: scale(1.04);
+}
+
+.pv-slash {
+  right: 4%;
+  top: 46%;
+  max-width: min(52rem, 68%);
+  transform: translateY(-50%) rotate(var(--pv-angle, -8deg));
+}
+
+.pv-slash .pv-mask::before {
+  inset: 0.18em -0.28em;
+  transform: skewX(-22deg);
+}
+
+.pv-echo {
+  left: 9%;
+  top: 10%;
+  max-width: min(54rem, 72%);
+}
+
+.pv-glitch {
+  left: 50%;
+  bottom: 14%;
+  transform: translateX(-50%);
+  max-width: min(60rem, 74%);
+}
+
+.pv-glitch .pv-text {
+  animation: pvGlitchShift 460ms steps(2, end) 2 both;
+}
+
+.pv-echo-copy {
+  position: absolute;
+  z-index: 0;
+  top: 0.14em;
+  left: 0.22em;
+  max-width: 14ch;
+  color: transparent;
+  font-size: inherit;
+  font-weight: 900;
+  line-height: 0.96;
+  -webkit-text-stroke: 0.055em var(--pv-main);
+  opacity: 0.28;
+  transform: translate(calc(var(--copy-x, 1) * 10px), calc(var(--copy-y, 1) * 9px));
+  animation: pvEchoFloat var(--pv-duration, 3200ms) ease-out both;
+}
+
+.pv-echo-copy.copy-1 {
+  --copy-x: -1;
+  --copy-y: -1;
+  opacity: 0.34;
+}
+
+.pv-echo-copy.copy-2 {
+  --copy-x: 1;
+  --copy-y: 1;
+  color: rgba(255, 92, 168, 0.18);
+}
+
+.pv-echo-copy.copy-3 {
+  --copy-x: 2;
+  --copy-y: -0.4;
+  color: rgba(255, 209, 102, 0.14);
+}
+
+.pv-cut {
+  position: absolute;
+  z-index: 3;
+  display: block;
+  height: 0.18rem;
+  width: 8rem;
+  background: var(--pv-main);
+  box-shadow: 0 0 18px var(--pv-shadow);
+  opacity: 0;
+  transform: rotate(var(--pv-angle, -10deg)) scaleX(0);
+  transform-origin: left center;
+  animation: pvCutFlash 620ms ease-out forwards;
+  animation-delay: var(--cut-delay, 140ms);
+}
+
+.pv-cut.cut-1 {
+  left: -0.6rem;
+  top: -0.08rem;
+}
+
+.pv-cut.cut-2 {
+  right: -0.2rem;
+  bottom: 0.12rem;
+}
+
+.pv-cut.cut-3 {
+  left: 20%;
+  bottom: -0.34rem;
+  width: 4.5rem;
+}
+
+.pv-word-hit {
+  z-index: 4;
+  padding: 0.05em 0.2em 0.14em;
+  color: #000308;
+  font-size: 2.05rem;
+  font-weight: 900;
+  line-height: 0.9;
+  background: #f7fffd;
+  box-shadow:
+    0 0 0 2px rgba(0, 3, 8, 0.82),
+    0 0 22px rgba(255, 255, 255, 0.38);
+  transform: rotate(var(--hit-tilt, 0deg)) scale(0.82);
+  animation: pvWordHit 700ms cubic-bezier(0.2, 0.86, 0.16, 1) forwards;
+}
+
+.pv-word-hit.lane-0 {
+  left: 13%;
+  top: 19%;
+  background: var(--accent-warm);
+}
+
+.pv-word-hit.lane-1 {
+  right: 12%;
+  top: 25%;
+  background: var(--accent-hot);
+}
+
+.pv-word-hit.lane-2 {
+  left: 18%;
+  bottom: 22%;
+  background: var(--accent);
+}
+
+.pv-word-hit.lane-3 {
+  right: 18%;
+  bottom: 28%;
+}
+
+.pv-word-hit.lane-4 {
+  left: 42%;
+  top: 14%;
+  background: #ffffff;
+}
+
+.pv-word-hit.lane-5 {
+  left: 46%;
+  bottom: 14%;
+  background: #000308;
+  color: #f7fffd;
+  box-shadow:
+    0 0 0 2px rgba(247, 255, 253, 0.82),
+    0 0 22px rgba(57, 197, 187, 0.42);
+}
+
+.pv-char-tick {
+  z-index: 5;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(247, 255, 253, 0.85);
+  color: var(--accent-warm);
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1;
+  background: rgba(0, 3, 8, 0.62);
+  box-shadow: 0 0 16px rgba(255, 209, 102, 0.44);
+  animation: pvCharTick 420ms ease-out forwards;
+}
+
+.pv-char-tick.dot-0 {
+  left: 28%;
+  top: 28%;
+}
+
+.pv-char-tick.dot-1 {
+  right: 31%;
+  top: 21%;
+}
+
+.pv-char-tick.dot-2 {
+  left: 36%;
+  bottom: 30%;
+}
+
+.pv-char-tick.dot-3 {
+  right: 24%;
+  bottom: 38%;
+}
+
+.pv-char-tick.dot-4 {
+  left: 18%;
+  top: 45%;
+}
+
+.pv-char-tick.dot-5 {
+  right: 18%;
+  top: 52%;
+}
+
+.pv-char-tick.dot-6 {
+  left: 52%;
+  top: 24%;
+}
+
+.pv-char-tick.dot-7 {
+  left: 58%;
+  bottom: 24%;
+}
+
+@keyframes pvMaskSweep {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes pvMaskDrop {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes pvCharPop {
+  0% {
+    opacity: 0;
+    transform: translateY(0.58em) rotate(var(--char-tilt, 0deg)) scale(0.72);
+  }
+  58% {
+    opacity: 1;
+    transform: translateY(-0.08em) rotate(0deg) scale(1.08);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg) scale(1);
+  }
+}
+
+@keyframes pvPhraseHold {
+  0% {
+    opacity: 0;
+    transform: translateY(0.24rem) scale(0.98);
+  }
+  12%,
+  82% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0.18;
+    transform: translateY(-0.2rem) scale(1.015);
+  }
+}
+
+@keyframes pvSlideDrift {
+  0% {
+    opacity: 0;
+    transform: translateX(-3.2rem) skewX(-7deg);
+  }
+  12%,
+  78% {
+    opacity: 1;
+    transform: translateX(0) skewX(0deg);
+  }
+  100% {
+    opacity: 0.28;
+    transform: translateX(1.1rem) skewX(2deg);
+  }
+}
+
+@keyframes pvEchoFloat {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.98);
+  }
+  18% {
+    opacity: 0.38;
+  }
+  100% {
+    opacity: 0.08;
+    transform: translate(calc(var(--copy-x, 1) * 1.4rem), calc(var(--copy-y, 1) * 1.1rem)) scale(1.03);
+  }
+}
+
+@keyframes pvGlitchShift {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  22% {
+    transform: translate(-0.08em, 0.03em);
+  }
+  42% {
+    transform: translate(0.08em, -0.02em);
+  }
+  62% {
+    transform: translate(-0.04em, -0.03em);
+  }
+}
+
+@keyframes pvCutFlash {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--pv-angle, -10deg)) scaleX(0);
+  }
+  32% {
+    opacity: 0.96;
+    transform: rotate(var(--pv-angle, -10deg)) scaleX(1);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--pv-angle, -10deg)) translateX(1.4rem) scaleX(0.12);
+  }
+}
+
+@keyframes pvWordHit {
+  0% {
+    opacity: 0;
+    transform: rotate(var(--hit-tilt, 0deg)) scale(0.72) translateY(0.7rem);
+    clip-path: inset(0 100% 0 0);
+  }
+  36% {
+    opacity: 1;
+    transform: rotate(var(--hit-tilt, 0deg)) scale(1.08) translateY(0);
+    clip-path: inset(0 0 0 0);
+  }
+  100% {
+    opacity: 0;
+    transform: rotate(var(--hit-tilt, 0deg)) scale(0.92) translateY(-0.35rem);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes pvCharTick {
+  0% {
+    opacity: 0;
+    transform: scale(0.5) rotate(-12deg);
+  }
+  46% {
+    opacity: 1;
+    transform: scale(1.14) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.82) rotate(10deg);
+  }
+}
+
+@keyframes pvExit {
+  to {
+    opacity: 0;
+    transform: translateY(-0.5rem) scale(0.98);
+  }
+}
+
 .stage-hud {
   position: absolute;
   top: 0;
@@ -160,11 +689,13 @@ input {
 
 .phrase-panel {
   position: absolute;
-  left: clamp(16px, 4vw, 42px);
+  right: clamp(16px, 4vw, 42px);
   bottom: 104px;
-  z-index: 8;
-  width: min(420px, calc(100vw - 32px));
+  z-index: 6;
+  width: min(360px, calc(100vw - 32px));
   pointer-events: none;
+  text-align: right;
+  opacity: 0.26;
 }
 
 .phrase-panel p {
@@ -178,7 +709,7 @@ input {
   min-height: 2.8em;
   max-width: 26ch;
   color: var(--text);
-  font-size: clamp(1rem, 2.2vw, 1.55rem);
+  font-size: 1.05rem;
   font-weight: 700;
   line-height: 1.22;
   overflow-wrap: anywhere;
@@ -297,6 +828,59 @@ button:disabled {
 }
 
 @media (max-width: 720px) {
+  .typography-layer {
+    inset: 82px 0 98px;
+  }
+
+  .pv-short,
+  .pv-short .pv-text {
+    font-size: 3.35rem;
+  }
+
+  .pv-medium,
+  .pv-medium .pv-text {
+    font-size: 2.62rem;
+  }
+
+  .pv-long,
+  .pv-long .pv-text {
+    font-size: 1.86rem;
+  }
+
+  .pv-slide,
+  .pv-echo {
+    left: 3%;
+    max-width: 82%;
+  }
+
+  .pv-vertical {
+    right: 4%;
+    top: 4%;
+  }
+
+  .pv-vertical .pv-text {
+    max-height: 21rem;
+  }
+
+  .pv-slash {
+    right: 2%;
+    max-width: 86%;
+  }
+
+  .pv-glitch {
+    max-width: 88%;
+  }
+
+  .pv-word-hit {
+    font-size: 1.46rem;
+  }
+
+  .pv-char-tick {
+    min-width: 1.1rem;
+    height: 1.1rem;
+    font-size: 0.72rem;
+  }
+
   .stage-hud {
     align-items: stretch;
     padding-top: 14px;
@@ -312,7 +896,7 @@ button:disabled {
   }
 
   .phrase-panel {
-    bottom: 112px;
+    display: none;
   }
 
   .controls-overlay {
@@ -331,6 +915,42 @@ button:disabled {
 }
 
 @media (max-width: 440px) {
+  .typography-layer {
+    inset: 90px 0 104px;
+  }
+
+  .pv-short,
+  .pv-short .pv-text {
+    font-size: 2.52rem;
+  }
+
+  .pv-medium,
+  .pv-medium .pv-text {
+    font-size: 2rem;
+  }
+
+  .pv-long,
+  .pv-long .pv-text {
+    font-size: 1.42rem;
+  }
+
+  .pv-text {
+    max-width: 11ch;
+  }
+
+  .pv-burst {
+    top: 44%;
+  }
+
+  .pv-word-hit {
+    font-size: 1.08rem;
+  }
+
+  .pv-word-hit.lane-4,
+  .pv-word-hit.lane-5 {
+    left: 34%;
+  }
+
   .now-playing div {
     gap: 6px;
   }
@@ -344,6 +964,40 @@ button:disabled {
   }
 
   .phrase {
-    font-size: clamp(0.95rem, 5vw, 1.25rem);
+    font-size: 0.95rem;
+  }
+}
+
+@media (max-height: 560px) {
+  .typography-layer {
+    inset: 58px 0 82px;
+  }
+
+  .pv-short,
+  .pv-short .pv-text {
+    font-size: 2.8rem;
+  }
+
+  .pv-medium,
+  .pv-medium .pv-text {
+    font-size: 2.15rem;
+  }
+
+  .pv-long,
+  .pv-long .pv-text {
+    font-size: 1.52rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pv-phrase,
+  .pv-word-hit,
+  .pv-char-tick,
+  .pv-mask,
+  .pv-char,
+  .pv-cut,
+  .pv-echo-copy {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
   }
 }

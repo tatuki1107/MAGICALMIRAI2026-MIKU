@@ -102,7 +102,10 @@
 
     elements.jump.addEventListener("click", () => {
       const firstPhrase = player.video && player.video.firstPhrase;
-      if (firstPhrase) player.requestMediaSeek(firstPhrase.startTime);
+      if (firstPhrase) {
+        player.requestMediaSeek(firstPhrase.startTime);
+        registerPhrase(firstPhrase, firstPhrase.startTime);
+      }
     });
 
     elements.seek.addEventListener("input", () => {
@@ -290,6 +293,8 @@
       state.phrase.progress = lyric.progress;
       document.documentElement.style.setProperty("--phrase-progress", lyric.progress.toFixed(3));
       registerPhrase(phrase, position);
+      registerWord(word, position);
+      registerChar(char, position);
     } else {
       state.phrase.progress = 0;
       document.documentElement.style.setProperty("--phrase-progress", "0");
@@ -305,13 +310,11 @@
   }
 
   function animateWord(now, unit) {
-    if (!unit.contains(now) || unit.startTime === lastWordStartTime) return;
-    lastWordStartTime = unit.startTime;
+    registerWord(unit, now);
   }
 
   function animateChar(now, unit) {
-    if (!unit.contains(now) || unit.startTime === lastCharStartTime) return;
-    lastCharStartTime = unit.startTime;
+    registerChar(unit, now);
   }
 
   function registerPhrase(unit, now) {
@@ -329,6 +332,41 @@
 
     elements.phrase.textContent = unit.text || "-";
     window.ModelStage?.onPhrase?.(state.phrase, now);
+    window.TextPV?.onPhrase?.({ ...state.phrase, isChorus: state.isChorus }, now);
+  }
+
+  function registerWord(unit, now) {
+    if (!unit || !unit.contains(now) || unit.startTime === lastWordStartTime) return;
+
+    lastWordStartTime = unit.startTime;
+    window.TextPV?.onWord?.(
+      {
+        text: unit.text || "",
+        startTime: unit.startTime,
+        endTime: unit.endTime,
+        phraseIndex: state.phrase?.index || 0,
+        phraseText: state.phrase?.text || "",
+        progress: typeof unit.progress === "function" ? clamp01(unit.progress(now)) : 0,
+      },
+      now,
+    );
+  }
+
+  function registerChar(unit, now) {
+    if (!unit || !unit.contains(now) || unit.startTime === lastCharStartTime) return;
+
+    lastCharStartTime = unit.startTime;
+    window.TextPV?.onChar?.(
+      {
+        text: unit.text || "",
+        startTime: unit.startTime,
+        endTime: unit.endTime,
+        phraseIndex: state.phrase?.index || 0,
+        phraseText: state.phrase?.text || "",
+        progress: typeof unit.progress === "function" ? clamp01(unit.progress(now)) : 0,
+      },
+      now,
+    );
   }
 
   function assignAnimation(unit, handler) {
@@ -397,6 +435,9 @@
   }
 
   function resetLiveState() {
+    lastPhraseStartTime = -1;
+    lastWordStartTime = -1;
+    lastCharStartTime = -1;
     state.beatProgress = 0;
     state.beatIndex = -1;
     state.isChorus = false;
@@ -408,6 +449,7 @@
     state.lyric.charStart = -1;
     state.lyric.vocal = 0;
     window.ModelStage?.reset?.();
+    window.TextPV?.reset?.();
   }
 
   function disableTransport(disabled) {
