@@ -6,6 +6,22 @@
   const REQUIRES_HTTP = window.location.protocol === "file:";
   const HTTP_REQUIRED_MESSAGE = "Open this project through http://localhost so TextAlive can fetch song data.";
 
+  // ── セクション構成 (①〜⑤) ──
+  // amelo=SIGNAL LOST / bmelo=SYSTEM SCAN / chorus=TAKEOVER /
+  // interlude=SIGNAL EXPANSION / finale=SIGNAL ACQUIRED
+  const SECTION_NAMES = {
+    intro: "SIGNAL LOST",
+    amelo: "SIGNAL LOST",
+    bmelo: "SYSTEM SCAN",
+    chorus: "TAKEOVER",
+    interlude: "SIGNAL EXPANSION",
+    finale: "SIGNAL ACQUIRED",
+  };
+  const SECTION_INDEX = { intro: 1, amelo: 1, bmelo: 2, chorus: 3, interlude: 4, finale: 5 };
+  const BMELO_WINDOW_MS = 12000; // サビ直前のこの時間を Bメロ(SYSTEM SCAN)扱い
+  const SECTION_DEBOUNCE_MS = 350; // 短い歌の切れ目で section がチラつくのを防ぐ
+  const INTERLUDE_DEBOUNCE_MS = 1800; // フレーズ間の短い無音を間奏と誤判定しない猶予
+
   const $ = (selector) => document.querySelector(selector);
   const elements = {
     status: $("#status"),
@@ -40,6 +56,7 @@
   state.phraseIndex = 0;
   state.phrase = state.phrase || { index: 0, text: "", startTime: -1, endTime: -1, progress: 0 };
   state.lyric = state.lyric || { active: false, progress: 0, wordStart: -1, charStart: -1, vocal: 0 };
+  state.section = state.section || { id: "intro", name: "SIGNAL LOST", index: 1, progress: 0 };
 
   if (!window.TextAliveApp) {
     setStatus("TextAlive App API could not be loaded.", "error");
@@ -55,6 +72,11 @@
   let lastWordStartTime = -1;
   let lastCharStartTime = -1;
   let lastPlayRequestAt = -Infinity;
+  let choruses = [];
+  let firstPhraseTime = -1;
+  let committedSectionId = "intro";
+  let pendingSectionId = "intro";
+  let pendingSectionSince = 0;
 
   bindControls();
 
@@ -223,6 +245,8 @@
     assignAnimation(video.firstChar, animateChar);
 
     maxVocalAmplitude = safe(() => player.getMaxVocalAmplitude()) || 0;
+    choruses = (safe(() => player.getChoruses()) || []).slice().sort((a, b) => a.startTime - b.startTime);
+    firstPhraseTime = video.firstPhrase ? video.firstPhrase.startTime : -1;
 
     const song = player.data && player.data.song;
     elements.songTitle.textContent = song && song.name ? song.name : "TAKEOVER";
@@ -268,6 +292,63 @@
     updateBeat(position);
     updateHarmony(position);
     updateLyricState(position);
+    updateSection(position);
+  }
+
+  // 再生位置とサビ/歌詞状態から ①〜⑤ のセクションを推定して配信する
+  function updateSection(position) {
+    const rawId = rawSectionId(position);
+    const nowMs = performance.now();
+
+    if (rawId !== pendingSectionId) {
+      pendingSectionId = rawId;
+      pendingSectionSince = nowMs;
+    }
+
+    // サビ/フィナーレ突入は即時、それ以外はチラつき防止で少し待つ
+    const immediate = rawId === "chorus" || rawId === "finale" || committedSectionId === "chorus";
+    const threshold = rawId === "interlude" ? INTERLUDE_DEBOUNCE_MS : SECTION_DEBOUNCE_MS;
+    const stable = nowMs - pendingSectionSince >= threshold;
+
+    if (rawId !== committedSectionId && (immediate || stable)) {
+      committedSectionId = rawId;
+      applySection(rawId, position);
+    }
+
+    const inChorus = safe(() => player.findChorus(position));
+    state.section.progress = inChorus ? clamp01(inChorus.progress(position)) : 0;
+  }
+
+  function rawSectionId(position) {
+    const inChorus = safe(() => player.findChorus(position));
+    const last = choruses.length ? choruses[choruses.length - 1] : null;
+
+    if (inChorus) {
+      return last && inChorus.startTime >= last.startTime ? "finale" : "chorus";
+    }
+    if (last && position > last.endTime) {
+      return "finale"; // 最終サビ後の余韻
+    }
+    if (state.lyric.active) {
+      const next = choruses.find((c) => c.startTime > position);
+      const timeToChorus = next ? next.startTime - position : Infinity;
+      return timeToChorus <= BMELO_WINDOW_MS ? "bmelo" : "amelo";
+    }
+    // 歌なし区間: イントロは SIGNAL LOST、それ以外は間奏
+    if (firstPhraseTime >= 0 && position < firstPhraseTime) return "amelo";
+    return "interlude";
+  }
+
+  function applySection(id, position) {
+    state.section = {
+      id,
+      name: SECTION_NAMES[id] || id,
+      index: SECTION_INDEX[id] || 0,
+      progress: state.section.progress || 0,
+    };
+    addEvent(`section: ${state.section.index} ${state.section.name}`);
+    window.ModelStage?.onSection?.(state.section, position);
+    window.TextPV?.onSection?.(state.section, position);
   }
 
   function updateLyricState(position) {
@@ -332,7 +413,25 @@
 
     elements.phrase.textContent = unit.text || "-";
     window.ModelStage?.onPhrase?.(state.phrase, now);
-    window.TextPV?.onPhrase?.({ ...state.phrase, isChorus: state.isChorus }, now);
+    window.TextPV?.onPhrase?.(
+      { ...state.phrase, isChorus: state.isChorus, words: collectWords(unit) },
+      now,
+    );
+  }
+
+  // フレーズを構成する単語テキストを順に取り出す (キーワード強調用)
+  function collectWords(phrase) {
+    const words = [];
+    let word = safe(() => phrase.firstWord);
+    const last = safe(() => phrase.lastWord);
+    let guard = 0;
+    while (word && guard < 64) {
+      words.push(String(word.text || ""));
+      if (word === last) break;
+      word = word.next;
+      guard += 1;
+    }
+    return words;
   }
 
   function registerWord(unit, now) {
@@ -448,6 +547,10 @@
     state.lyric.wordStart = -1;
     state.lyric.charStart = -1;
     state.lyric.vocal = 0;
+    state.section = { id: "intro", name: "SIGNAL LOST", index: 1, progress: 0 };
+    committedSectionId = "intro";
+    pendingSectionId = "intro";
+    pendingSectionSince = 0;
     window.ModelStage?.reset?.();
     window.TextPV?.reset?.();
   }

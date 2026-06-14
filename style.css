@@ -60,6 +60,78 @@ input {
   isolation: isolate;
 }
 
+/* セクション節目の大型ステータス文字 (D-5) */
+.pv-section-banner {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%) scale(0.9);
+  font-family: "Zen Kaku Gothic New", sans-serif;
+  font-weight: 900;
+  font-size: clamp(28px, 7vw, 96px);
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  color: #00ffd1;
+  text-shadow: 0 0 18px rgba(0, 255, 209, 0.65);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pv-section-banner.show {
+  animation: pvBanner 2.2s ease forwards;
+}
+
+.pv-section-banner[data-section="chorus"],
+.pv-section-banner[data-section="finale"] {
+  color: #ff70cc;
+  text-shadow: 0 0 22px rgba(255, 112, 204, 0.7);
+}
+
+@keyframes pvBanner {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.8);
+    letter-spacing: 0.4em;
+  }
+  14% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.04);
+  }
+}
+
+/* SYSTEM SCAN 中のスキャンライン (D-5) */
+.typography-layer.is-scan::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 255, 209, 0.06) 0px,
+    rgba(0, 255, 209, 0.06) 1px,
+    transparent 2px,
+    transparent 4px
+  );
+  animation: pvScan 6s linear infinite;
+  opacity: 0.55;
+}
+
+@keyframes pvScan {
+  from {
+    background-position-y: 0;
+  }
+  to {
+    background-position-y: 120px;
+  }
+}
+
 .pv-phrase,
 .pv-word-hit,
 .pv-char-tick {
@@ -79,6 +151,8 @@ input {
   line-height: 0.96;
   filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.46));
   animation: pvPhraseHold var(--pv-duration, 3200ms) linear both;
+  /* translate は transform と別プロパティなので各 variant の動きと衝突せず着地点だけずらせる */
+  translate: var(--pv-ox, 0) var(--pv-oy, 0);
 }
 
 .pv-phrase.is-exiting {
@@ -124,6 +198,29 @@ input {
   transform-origin: center 72%;
   animation: pvCharPop 560ms cubic-bezier(0.2, 0.9, 0.16, 1.14) both;
   animation-delay: calc(var(--i) * 31ms);
+}
+
+/* フレーズの「核」になる単語を大きく・前面に。脇の文字は少し引く (抑揚) */
+.pv-text.has-key .pv-char:not(.is-key) {
+  opacity: 0.6;
+  scale: 0.9;
+}
+
+.pv-char.is-key {
+  margin: 0 0.05em;
+  scale: 1.2;
+  color: var(--pv-main);
+  /* サイバー感の RGB ずらし + 強めのグロー */
+  text-shadow:
+    0 0 1px rgba(0, 3, 8, 0.96),
+    0.045em 0 var(--pv-shadow),
+    -0.045em 0 rgba(255, 92, 168, 0.55),
+    0 0 26px var(--pv-shadow);
+}
+
+/* サビのキーワードは声量に合わせて脈動する (scale も transform と別プロパティ) */
+.pv-phrase.is-chorus .pv-char.is-key {
+  scale: calc(1.18 + var(--pv-vocal, 0) * 0.24);
 }
 
 .pv-short,
