@@ -1,5 +1,9 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 const canvas = document.getElementById("stage-canvas");
 const shotName = document.getElementById("shotName");
@@ -20,7 +24,8 @@ renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000308);
-scene.fog = new THREE.FogExp2(0x000308, 0.035);
+// 星空を遠くまで見せるため霧はごく薄く(奥行き程度)
+scene.fog = new THREE.FogExp2(0x01030a, 0.006);
 
 const camera = new THREE.PerspectiveCamera(42, 1, 0.08, 120);
 camera.position.set(0, 1.45, 7.0);
@@ -50,11 +55,6 @@ scene.add(warm);
 const floorGroup = new THREE.Group();
 scene.add(floorGroup);
 buildFloor();
-const railLines = buildRailLines();
-scene.add(railLines);
-
-const particles = buildParticles();
-scene.add(particles);
 
 let mixer = null;
 let modelLoaded = false;
@@ -65,11 +65,106 @@ let beatPulse = 0;
 let previousBeat = -1;
 let lastPhraseIndex = 0;
 
+// 表情モーフ (D-3) — モデルに morphTarget があれば歌唱に同期
+let morphMesh = null;
+const morph = { mouth: -1, blink: -1, smile: -1 };
+let mouthValue = 0;
+let blinkValue = 0;
+let blinkTimer = 1.5;
+
+// セクション演出 (D-4/D-5) — app.js の section に追従
+const SECTION_VIS = {
+  intro: { energy: 0.1, motif: 0.2 },
+  amelo: { energy: 0.3, motif: 0.25 },
+  bmelo: { energy: 0.5, motif: 0.6 },
+  chorus: { energy: 1.0, motif: 0.8 },
+  interlude: { energy: 0.45, motif: 1.0 },
+  finale: { energy: 1.0, motif: 1.0 },
+};
+let sectionId = "intro";
+let sectionEnergy = 0; // 0=静 .. 1=最高潮
+let targetEnergy = 0.1;
+let motifIntensity = 0; // 信号モチーフ強度 0..1
+let targetMotif = 0.2;
+let ringPulse = 0;
+
 const clock = new THREE.Clock();
 const colorA = new THREE.Color(0x39c5bb);
 const colorB = new THREE.Color(0xff5ca8);
 const colorC = new THREE.Color(0xffd166);
 const tmpColor = new THREE.Color();
+
+// ── Stage spotlight rig ───────────────────────────────────────
+// ライブ会場風の可動スポット。被写体を照らしつつ拍/サビ/声量に反応して
+// 首を振り、色と輝度が脈動する。調整しやすいよう値は定数化。
+const SPOT_COUNT = 4;
+const SPOT = {
+  baseIntensity: 16, // 1灯あたりの基準輝度(candela)
+  beatBoost: 24, // 拍パルスで加算
+  chorusBoost: 12, // サビ時の上乗せ
+  vocalBoost: 9, // 声量で底上げ
+  angle: 0.28, // 円錐の開き(rad)
+  penumbra: 0.82, // 縁のソフトさ
+  distance: 32,
+  decay: 1.1,
+  height: 7.6, // 灯の高さ
+  ringRadius: 6.6, // 灯の配置半径
+  scanRadius: 1.7, // ターゲット走査の振れ幅(通常時)
+  scanSpeed: 0.5, // 走査速度(通常時)
+  beamOpacity: 0.05, // ビームコーンの基準不透明度(0 で無効)
+};
+const SPOT_COLORS = [colorA, colorB, colorC, colorB];
+const spotAim = new THREE.Vector3();
+const spotTmp = new THREE.Color();
+let spotTime = 0;
+const spotlights = buildSpotlights();
+
+// ── Bloom (Emission 発光の前提) ───────────────────────────────
+// 発光ライン/スポットだけを滲ませる。threshold 高めで肌や黒衣装は滲ませない。
+const BLOOM = {
+  strength: 0.55,
+  radius: 0.4,
+  threshold: 0.82,
+  beatBoost: 0.35, // 拍で加算
+  chorusBoost: 0.3, // サビで加算
+};
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(1, 1),
+  BLOOM.strength,
+  BLOOM.radius,
+  BLOOM.threshold,
+);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+composer.setPixelRatio(renderer.getPixelRatio());
+
+// ── 星空 / オーディオビジュアライザー / 流れ星 ───────────────
+const VIZ_BARS = 72; // 放射バーの本数
+const VIZ_INNER = 0.7; // 開始半径
+const VIZ_MAX_LEN = 3.2; // 最大の伸び
+const vizValues = new Float32Array(VIZ_BARS);
+let vizGeo = null;
+
+const SHOOT_MAX = 7; // 流れ星の最大同時数
+const SHOOT_HIDDEN = -9999; // 非アクティブ時に視界外へ退避
+const shootState = [];
+let shootSpawnTimer = 0;
+let shootHeadGeo = null;
+let shootLineGeo = null;
+
+const stars = buildStarfield();
+scene.add(stars);
+
+const vizGroup = new THREE.Group();
+scene.add(vizGroup);
+const viz = buildVisualizer();
+vizGroup.add(viz);
+
+const shooting = buildShootingStars();
+scene.add(shooting.points);
+scene.add(shooting.lines);
 
 const SHOTS = [
   { label: "Shot 01 / Front rise", az: -18, orbit: 54, el0: 7, el1: 15, radius0: 7.0, radius1: 6.0, y: 1.18, fov: 42 },
@@ -102,6 +197,7 @@ let activeShot = {
 
 window.ModelStage = {
   onPhrase,
+  onSection,
   reset,
 };
 
@@ -116,6 +212,7 @@ function loadModel() {
     "./3D/test-animationn.glb",
     (gltf) => {
       normalizeModel(gltf.scene);
+      setupMorphs(gltf.scene);
       modelRoot.add(gltf.scene);
 
       if (gltf.animations.length > 0) {
@@ -192,6 +289,16 @@ function reset() {
     from: { ...cam },
   };
   phrasePulse = 0;
+  sectionId = "intro";
+  targetEnergy = SECTION_VIS.intro.energy;
+  targetMotif = SECTION_VIS.intro.motif;
+  ringPulse = 0;
+  floorGroup.scale.setScalar(1);
+  vizValues.fill(0);
+  shootState.forEach((s) => {
+    s.active = false;
+  });
+  shootSpawnTimer = 0;
   shotName.textContent = SHOTS[0].label;
 }
 
@@ -211,14 +318,20 @@ function tick(now) {
 
   if (state.beatIndex !== previousBeat && state.beatIndex >= 0) {
     beatPulse = 1;
+    ringPulse = Math.max(ringPulse, 0.6 + 0.4 * motifIntensity);
     previousBeat = state.beatIndex;
   }
   beatPulse = Math.max(0, beatPulse - dt * 4.2);
   phrasePulse = Math.max(0, phrasePulse - dt * 1.7);
+  ringPulse = Math.max(0, ringPulse - dt * 1.4);
 
+  updateMorphs(dt);
   updateCamera(now, dt);
   updateScene(dt);
-  renderer.render(scene, camera);
+
+  bloomPass.strength =
+    BLOOM.strength + beatPulse * BLOOM.beatBoost + (state.isChorus ? BLOOM.chorusBoost : 0);
+  composer.render();
 }
 
 function updateCamera(now, dt) {
@@ -275,23 +388,211 @@ function updateScene(dt) {
   const vocal = state.lyric?.vocal || 0;
   const beat = beatPulse;
 
-  floorGroup.rotation.y += dt * (0.06 + chorus * 0.08);
-  railLines.rotation.y -= dt * (0.025 + chorus * 0.04);
-  particles.rotation.y += dt * 0.012;
+  // セクションのエネルギー/モチーフ強度をなめらかに追従
+  sectionEnergy += (targetEnergy - sectionEnergy) * Math.min(dt * 1.5, 1);
+  motifIntensity += (targetMotif - motifIntensity) * Math.min(dt * 1.5, 1);
+  const grade = Math.max(chorus, sectionEnergy); // 配色を桃色へ寄せる量
 
-  tmpColor.copy(colorA).lerp(colorB, chorus).lerp(colorC, beat * 0.28);
+  floorGroup.rotation.y += dt * (0.06 + grade * 0.1);
+  stars.rotation.y += dt * 0.006;
+  vizGroup.rotation.y += dt * 0.04;
+
+  // 信号リング: 拍でステージ床が外へ広がる
+  const ringScale = 1 + ringPulse * 0.22 * (0.5 + motifIntensity);
+  floorGroup.scale.setScalar(ringScale);
+
+  tmpColor.copy(colorA).lerp(colorB, grade).lerp(colorC, beat * 0.28);
   key.color.copy(tmpColor);
-  key.intensity = 3.2 + beat * 2.6 + vocal * 1.8 + chorus * 1.2;
-  rim.intensity = 2.5 + phrasePulse * 2.2 + chorus * 1.4;
+  key.intensity = 3.2 + beat * 2.6 + vocal * 1.8 + grade * 1.6;
+  rim.intensity = 2.5 + phrasePulse * 2.2 + grade * 1.6;
   warm.intensity = 2.2 + beat * 2.4 + phrasePulse * 1.6;
 
   if (modelLoaded) {
     modelRoot.traverse((node) => {
       if (!node.isMesh || !node.material) return;
       if ("emissiveIntensity" in node.material) {
-        node.material.emissiveIntensity = 0.15 + beat * 0.35 + chorus * 0.2;
+        // 発光ラインを Bloom に乗せる: エネルギーが高いほど強く光る
+        node.material.emissiveIntensity = 0.25 + beat * 0.5 + sectionEnergy * 0.6;
       }
     });
+  }
+
+  updateVisualizer(dt, beat, vocal, grade);
+  updateShootingStars(dt);
+  updateSpotlights(dt, beat, chorus, vocal);
+}
+
+// セクション切替 (app.js から呼ばれる)
+function onSection(section) {
+  sectionId = section?.id || "intro";
+  const vis = SECTION_VIS[sectionId] || SECTION_VIS.intro;
+  targetEnergy = vis.energy;
+  targetMotif = vis.motif;
+
+  // サビ/フィナーレ突入は「空間が切り替わる」インパクトを出す
+  if (sectionId === "chorus" || sectionId === "finale") {
+    const impact = sectionId === "finale" ? SHOTS[6] : SHOTS[3];
+    activeShot = {
+      ...impact,
+      startedAt: performance.now(),
+      duration: 5200,
+      from: { ...cam },
+    };
+    phrasePulse = 1;
+    ringPulse = 1;
+    shotName.textContent = impact.label;
+  }
+}
+
+// ── 表情モーフ (D-3) ──────────────────────────────────────────
+function setupMorphs(rootObj) {
+  morphMesh = null;
+  morph.mouth = morph.blink = morph.smile = -1;
+  rootObj.traverse((node) => {
+    if (morphMesh || !node.isMesh || !node.morphTargetDictionary) return;
+    morphMesh = node;
+  });
+  if (!morphMesh) return; // モーフ無し(仮モデル等)は何もしない
+
+  const dict = morphMesh.morphTargetDictionary;
+  // 想定モデルのモーフ名は未確定なので候補を広く当て、部分一致でも拾う
+  morph.mouth = resolveMorph(dict, ["あ", "aa", "A", "mouth", "口開け", "Fcl_MTH_A", "vrc.v_aa"]);
+  morph.blink = resolveMorph(dict, ["まばたき", "blink", "目閉じ", "eye_close", "Fcl_EYE_Close"]);
+  morph.smile = resolveMorph(dict, ["笑い", "笑顔", "smile", "joy", "happy", "Fcl_ALL_Joy"]);
+}
+
+function resolveMorph(dict, names) {
+  for (const name of names) {
+    if (name in dict) return dict[name];
+  }
+  const keys = Object.keys(dict);
+  for (const name of names) {
+    const hit = keys.find((key) => key.toLowerCase().includes(name.toLowerCase()));
+    if (hit) return dict[hit];
+  }
+  return -1;
+}
+
+function updateMorphs(dt) {
+  if (!morphMesh || !morphMesh.morphTargetInfluences) return;
+  const infl = morphMesh.morphTargetInfluences;
+  const playing = !!state.isPlaying;
+
+  // 口: 声量に追従(アタック速・リリース遅)
+  const mouthTarget = playing ? state.lyric?.vocal || 0 : 0;
+  mouthValue += (mouthTarget - mouthValue) * (mouthTarget > mouthValue ? 0.5 : 0.12);
+
+  // 瞬き: 2〜5秒間隔で短く閉じる
+  blinkTimer -= dt;
+  if (blinkTimer <= 0) {
+    blinkValue = 1;
+    blinkTimer = 2 + Math.random() * 3;
+  }
+  blinkValue = Math.max(0, blinkValue - dt * 7);
+
+  // 笑顔: サビ/フィナーレで緩やかに
+  const smileTarget = sectionId === "chorus" || sectionId === "finale" ? 0.6 : 0;
+
+  if (morph.mouth >= 0) infl[morph.mouth] = clamp(mouthValue, 0, 1);
+  if (morph.blink >= 0) infl[morph.blink] = clamp(blinkValue, 0, 1);
+  if (morph.smile >= 0) {
+    infl[morph.smile] = clamp(infl[morph.smile] + (smileTarget - infl[morph.smile]) * dt * 2, 0, 0.8);
+  }
+}
+
+function buildSpotlights() {
+  const rig = [];
+  const beamGeo = SPOT.beamOpacity > 0 ? makeBeamGeometry(SPOT.height + 1.5, SPOT.angle) : null;
+
+  for (let i = 0; i < SPOT_COUNT; i += 1) {
+    const baseAngle = (i / SPOT_COUNT) * Math.PI * 2;
+    const color = SPOT_COLORS[i % SPOT_COLORS.length];
+    const spot = new THREE.SpotLight(
+      color.getHex(),
+      0,
+      SPOT.distance,
+      SPOT.angle,
+      SPOT.penumbra,
+      SPOT.decay,
+    );
+    spot.position.set(
+      Math.cos(baseAngle) * SPOT.ringRadius,
+      SPOT.height + (i % 2) * 1.1,
+      Math.sin(baseAngle) * SPOT.ringRadius,
+    );
+    spot.target.position.set(0, modelCenterY, 0);
+    scene.add(spot);
+    scene.add(spot.target);
+
+    let beam = null;
+    if (beamGeo) {
+      beam = new THREE.Mesh(
+        beamGeo,
+        new THREE.MeshBasicMaterial({
+          color: color.clone(),
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          fog: false,
+        }),
+      );
+      beam.position.copy(spot.position);
+      scene.add(beam);
+    }
+
+    rig.push({ spot, beam, phase: baseAngle, color });
+  }
+  return rig;
+}
+
+// 頂点を原点・-Z 方向へ伸ばした円錐。lookAt でターゲットへ向けて使う。
+function makeBeamGeometry(length, angle) {
+  const baseRadius = Math.tan(angle) * length;
+  const geo = new THREE.ConeGeometry(baseRadius, length, 24, 1, true);
+  geo.translate(0, -length / 2, 0);
+  geo.rotateX(Math.PI / 2);
+  return geo;
+}
+
+function updateSpotlights(dt, beat, chorus, vocal) {
+  if (!spotlights.length) return;
+  spotTime += dt;
+
+  // サビで走査が速く・広くなる
+  const scanSpeed = SPOT.scanSpeed * (1 + chorus * 1.4);
+  const scanRadius = SPOT.scanRadius * (1 + chorus * 0.8);
+
+  for (let i = 0; i < spotlights.length; i += 1) {
+    const { spot, beam, phase, color } = spotlights[i];
+
+    // リサージュ走査: 被写体(原点・modelCenterY)周囲をなめらかに描く
+    spotAim.set(
+      Math.sin(spotTime * scanSpeed + phase) * scanRadius,
+      modelCenterY + Math.sin(spotTime * scanSpeed * 0.6 + phase * 1.7) * 0.5,
+      Math.cos(spotTime * scanSpeed * 0.8 + phase) * scanRadius,
+    );
+    spot.target.position.lerp(spotAim, 0.1);
+    spot.target.updateMatrixWorld();
+
+    // 色: サビで桃色寄り
+    spotTmp.copy(color).lerp(colorB, chorus * 0.6);
+    spot.color.copy(spotTmp);
+
+    // 輝度: 基準 + 拍(灯ごとに位相差) + サビ + 声量
+    const beatPhase = 0.6 + 0.4 * Math.sin(phase * 2);
+    spot.intensity =
+      SPOT.baseIntensity +
+      beat * SPOT.beatBoost * beatPhase +
+      chorus * SPOT.chorusBoost +
+      vocal * SPOT.vocalBoost;
+
+    if (beam) {
+      beam.lookAt(spot.target.position);
+      beam.material.color.copy(spotTmp);
+      beam.material.opacity = SPOT.beamOpacity * (0.5 + beat * 0.9 + chorus * 0.5 + vocal * 0.4);
+    }
   }
 }
 
@@ -315,75 +616,190 @@ function buildFloor() {
     ring.material.opacity = 0.24 - i * 0.016;
     floorGroup.add(ring);
   }
-
-  const spokeMaterial = new THREE.LineBasicMaterial({
-    color: 0xffd166,
-    transparent: true,
-    opacity: 0.18,
-  });
-  const positions = [];
-  for (let i = 0; i < 28; i += 1) {
-    const a = (i / 28) * Math.PI * 2;
-    positions.push(Math.cos(a) * 1.0, 0.018, Math.sin(a) * 1.0);
-    positions.push(Math.cos(a) * 6.1, 0.018, Math.sin(a) * 6.1);
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  floorGroup.add(new THREE.LineSegments(geo, spokeMaterial));
 }
 
-function buildRailLines() {
-  const group = new THREE.Group();
-  const material = new THREE.LineBasicMaterial({
-    color: 0xff5ca8,
-    transparent: true,
-    opacity: 0.22,
-  });
-  const positions = [];
-
-  for (let i = 0; i < 34; i += 1) {
-    const a = (i / 34) * Math.PI * 2;
-    const inner = 4.4 + (i % 3) * 0.28;
-    const outer = 9.0 + (i % 4) * 0.45;
-    const y0 = 0.55 + (i % 5) * 0.16;
-    const y1 = 3.8 + (i % 6) * 0.34;
-    positions.push(Math.cos(a) * inner, y0, Math.sin(a) * inner);
-    positions.push(Math.cos(a + 0.12) * outer, y1, Math.sin(a + 0.12) * outer);
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  group.add(new THREE.LineSegments(geo, material));
-  return group;
-}
-
-function buildParticles() {
-  const count = 320;
+// ステージを包む星空(大きな球殻に星を散らす)
+function buildStarfield() {
+  const count = 1600;
   const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const tint = new THREE.Color();
   for (let i = 0; i < count; i += 1) {
-    const radius = 8 + Math.random() * 28;
-    const angle = Math.random() * Math.PI * 2;
-    positions[i * 3] = Math.cos(angle) * radius;
-    positions[i * 3 + 1] = 0.8 + Math.random() * 12;
-    positions[i * 3 + 2] = Math.sin(angle) * radius;
+    const r = 36 + Math.random() * 54;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = r * Math.cos(phi);
+    positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+    // 白〜シアンのゆらぎ
+    tint.copy(colorA).lerp(new THREE.Color(0xffffff), 0.45 + Math.random() * 0.55);
+    colors[i * 3] = tint.r;
+    colors[i * 3 + 1] = tint.g;
+    colors[i * 3 + 2] = tint.b;
   }
-
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   const material = new THREE.PointsMaterial({
-    color: 0xb9fff5,
-    size: 0.025,
+    size: 2.0,
+    sizeAttenuation: false,
     transparent: true,
-    opacity: 0.48,
+    opacity: 0.95,
+    vertexColors: true,
     depthWrite: false,
   });
   return new THREE.Points(geo, material);
+}
+
+// 床リング中心から外側へ放射するオーディオビジュアライザー
+function buildVisualizer() {
+  const positions = new Float32Array(VIZ_BARS * 2 * 3);
+  for (let i = 0; i < VIZ_BARS; i += 1) {
+    const a = (i / VIZ_BARS) * Math.PI * 2;
+    const cx = Math.cos(a);
+    const cz = Math.sin(a);
+    positions[i * 6] = cx * VIZ_INNER;
+    positions[i * 6 + 1] = 0.05;
+    positions[i * 6 + 2] = cz * VIZ_INNER;
+    positions[i * 6 + 3] = cx * (VIZ_INNER + 0.2);
+    positions[i * 6 + 4] = 0.05;
+    positions[i * 6 + 5] = cz * (VIZ_INNER + 0.2);
+  }
+  vizGeo = new THREE.BufferGeometry();
+  vizGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.LineBasicMaterial({
+    color: colorA.clone(),
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+  });
+  return new THREE.LineSegments(vizGeo, material);
+}
+
+function updateVisualizer(dt, beat, vocal, grade) {
+  if (!vizGeo) return;
+  const pos = vizGeo.attributes.position.array;
+  const t = clock.elapsedTime;
+  for (let i = 0; i < VIZ_BARS; i += 1) {
+    // 疑似スペクトル: 複数サインの合成に拍/声量を乗せる
+    const shape = 0.35 + 0.65 * Math.abs(Math.sin(i * 0.4 + t * 2.2)) * Math.abs(Math.cos(i * 0.13 - t * 1.3));
+    const target = shape * (0.15 + beat * 0.6 + vocal * 1.0);
+    vizValues[i] += (target - vizValues[i]) * Math.min(dt * 12, 1);
+    const a = (i / VIZ_BARS) * Math.PI * 2;
+    const outer = VIZ_INNER + 0.2 + vizValues[i] * VIZ_MAX_LEN;
+    pos[i * 6 + 3] = Math.cos(a) * outer;
+    pos[i * 6 + 5] = Math.sin(a) * outer;
+  }
+  vizGeo.attributes.position.needsUpdate = true;
+  tmpColor.copy(colorA).lerp(colorB, grade);
+  viz.material.color.copy(tmpColor);
+  viz.material.opacity = 0.5 + beat * 0.35 + grade * 0.2;
+}
+
+// 流れ星(ラスサビで降る)。頭=点群 / 尾=線分。
+function buildShootingStars() {
+  const headPos = new Float32Array(SHOOT_MAX * 3).fill(SHOOT_HIDDEN);
+  shootHeadGeo = new THREE.BufferGeometry();
+  shootHeadGeo.setAttribute("position", new THREE.BufferAttribute(headPos, 3));
+  const points = new THREE.Points(
+    shootHeadGeo,
+    new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 3.4,
+      sizeAttenuation: false,
+      transparent: true,
+      opacity: 0.95,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
+
+  const linePos = new Float32Array(SHOOT_MAX * 2 * 3).fill(SHOOT_HIDDEN);
+  shootLineGeo = new THREE.BufferGeometry();
+  shootLineGeo.setAttribute("position", new THREE.BufferAttribute(linePos, 3));
+  const lines = new THREE.LineSegments(
+    shootLineGeo,
+    new THREE.LineBasicMaterial({
+      color: 0xbfefff,
+      transparent: true,
+      opacity: 0.7,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
+
+  for (let i = 0; i < SHOOT_MAX; i += 1) {
+    shootState.push({ active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0 });
+  }
+  points.frustumCulled = false;
+  lines.frustumCulled = false;
+  return { points, lines };
+}
+
+function spawnShootingStar(star) {
+  const angle = Math.random() * Math.PI * 2;
+  const r = 22 + Math.random() * 16;
+  star.pos.set(Math.cos(angle) * r, 16 + Math.random() * 10, Math.sin(angle) * r);
+  const speed = 24 + Math.random() * 18;
+  star.vel
+    .set(
+      -Math.cos(angle) * 0.6 + (Math.random() - 0.5),
+      -0.8 - Math.random() * 0.5,
+      -Math.sin(angle) * 0.6 + (Math.random() - 0.5),
+    )
+    .normalize()
+    .multiplyScalar(speed);
+  star.life = 1.0 + Math.random() * 0.6;
+  star.active = true;
+}
+
+function updateShootingStars(dt) {
+  const headPos = shootHeadGeo.attributes.position.array;
+  const linePos = shootLineGeo.attributes.position.array;
+  const tailLen = 2.4;
+
+  // ラスサビ中のみ周期的に発生
+  if (sectionId === "finale") {
+    shootSpawnTimer -= dt;
+    if (shootSpawnTimer <= 0) {
+      const free = shootState.find((s) => !s.active);
+      if (free) spawnShootingStar(free);
+      shootSpawnTimer = 0.35 + Math.random() * 0.55;
+    }
+  }
+
+  for (let i = 0; i < SHOOT_MAX; i += 1) {
+    const s = shootState[i];
+    if (s.active) {
+      s.pos.addScaledVector(s.vel, dt);
+      s.life -= dt;
+      if (s.life <= 0 || s.pos.y < -2) s.active = false;
+    }
+    if (s.active) {
+      const vlen = s.vel.length() || 1;
+      headPos[i * 3] = s.pos.x;
+      headPos[i * 3 + 1] = s.pos.y;
+      headPos[i * 3 + 2] = s.pos.z;
+      linePos[i * 6] = s.pos.x;
+      linePos[i * 6 + 1] = s.pos.y;
+      linePos[i * 6 + 2] = s.pos.z;
+      linePos[i * 6 + 3] = s.pos.x - (s.vel.x / vlen) * tailLen;
+      linePos[i * 6 + 4] = s.pos.y - (s.vel.y / vlen) * tailLen;
+      linePos[i * 6 + 5] = s.pos.z - (s.vel.z / vlen) * tailLen;
+    } else {
+      headPos[i * 3] = headPos[i * 3 + 1] = headPos[i * 3 + 2] = SHOOT_HIDDEN;
+      for (let k = 0; k < 6; k += 1) linePos[i * 6 + k] = SHOOT_HIDDEN;
+    }
+  }
+  shootHeadGeo.attributes.position.needsUpdate = true;
+  shootLineGeo.attributes.position.needsUpdate = true;
 }
 
 function resize() {
   const width = canvas.clientWidth || window.innerWidth || 1;
   const height = canvas.clientHeight || window.innerHeight || 1;
   renderer.setSize(width, height, false);
+  composer.setSize(width, height);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
 }
