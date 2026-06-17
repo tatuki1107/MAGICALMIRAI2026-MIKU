@@ -16,12 +16,19 @@
   // 出てきた順番ではなく「曲のどこか」で見た目が決まるようにする。
   // variants/tones は許容セットで、フレーズ本文のハッシュ+直前回避で選ぶ。
   const SECTION_STYLE = {
-    intro: { variants: ["slide", "slash", "echo", "glitch"], tones: ["cyan", "white"] },
-    amelo: { variants: ["slide", "slash", "echo", "glitch"], tones: ["cyan", "white"] },
-    bmelo: { variants: ["vertical", "slash", "echo"], tones: ["cyan", "white"] },
-    chorus: { variants: ["burst", "glitch", "slide"], tones: ["hot", "warm", "white"] },
-    interlude: { variants: ["echo", "slash", "vertical"], tones: ["cyan", "warm"] },
-    finale: { variants: ["burst", "slide", "glitch"], tones: ["warm", "white", "hot"] },
+    intro:     { variants: ["typewriter", "slide", "slash", "pixel"],    tones: ["cyan", "white"] },
+    amelo:     { variants: ["typewriter", "slide", "echo", "glitch"],    tones: ["cyan", "white"] },
+    bmelo:     { variants: ["vibrate", "vertical", "slash", "pixel"],    tones: ["cyan", "white"] },
+    chorus:    { variants: ["particle", "burst", "glitch", "slide"],     tones: ["hot", "warm", "white"] },
+    interlude: { variants: ["vibrate", "polygon", "echo", "vertical"],   tones: ["cyan", "warm"] },
+    finale:    { variants: ["particle", "polygon", "burst", "glitch"],   tones: ["warm", "white", "hot"] },
+  };
+
+  const TONE_COLOR = {
+    cyan:  "#39c5bb",
+    hot:   "#ff5ca8",
+    warm:  "#ffd166",
+    white: "#ffffff",
   };
   const FALLBACK_STYLE = SECTION_STYLE.amelo;
 
@@ -31,8 +38,6 @@
   let lastWordLane = -1;
   let lastTickDot = -1;
 
-  let bannerElement = null;
-  let bannerTimer = 0;
   let vocalRaf = 0;
 
   window.TextPV = {
@@ -72,77 +77,187 @@
       isChorus: !!phrase?.isChorus,
       seed,
     });
-    const entry = { element: phraseElement, index, text };
+    const entry = { element: phraseElement, index, text, dissolve: null };
 
     lastPhraseIndex = index;
     activePhrases.push(entry);
     layer.appendChild(phraseElement);
+
+    // variant 固有の後処理
+    const color = TONE_COLOR[tone] || "#ffffff";
+    if (variant === "typewriter") {
+      applyTypewriter(phraseElement);
+    } else if (variant === "pixel") {
+      entry.dissolve = applyPixel(phraseElement, text, color);
+    } else if (variant === "polygon") {
+      entry.dissolve = spawnPolygons(layer, phraseElement);
+    } else if (variant === "particle") {
+      entry.dissolve = spawnParticle(text, color, duration);
+    }
+
     trimActivePhrases();
 
-    schedule(() => removePhrase(entry), duration + 1200);
+    schedule(() => removePhrase(entry), duration);
   }
 
-  function onWord(word) {
-    const text = normalizeText(word?.text);
-    if (!text) return;
-
-    const lane = nextLane(6, () => lastWordLane, (v) => (lastWordLane = v));
-    const hit = document.createElement("span");
-    hit.className = `pv-word-hit lane-${lane}`;
-    hit.textContent = text;
-    hit.style.setProperty("--hit-index", String(lane));
-    hit.style.setProperty("--hit-tilt", `${-12 + ((hashText(text) % 6) * 5)}deg`);
-    layer.appendChild(hit);
-    wordHitIndex += 1;
-
-    trimFloating(".pv-word-hit", MAX_WORD_HITS);
-    schedule(() => hit.remove(), 720);
+  function onWord(_word) {
+    // 単語バッジ削除済み
   }
 
-  function onChar(char) {
-    const text = normalizeText(char?.text);
-    if (!text || text.length > 2) return;
-
-    const dot = nextLane(8, () => lastTickDot, (v) => (lastTickDot = v));
-    const tick = document.createElement("span");
-    tick.className = `pv-char-tick dot-${dot}`;
-    tick.textContent = text;
-    tick.style.setProperty("--tick-index", String(dot));
-    layer.appendChild(tick);
-    charTickIndex += 1;
-
-    trimFloating(".pv-char-tick", MAX_CHAR_TICKS);
-    schedule(() => tick.remove(), 420);
+  function onChar(_char) {
+    // キャラクタティック削除済み
   }
 
-  // セクション切替: 節目の大型ステータス文字と SYSTEM SCAN のスキャンライン (D-5)
-  function onSection(section) {
-    const id = section?.id || "intro";
-    const name = section?.name || "";
-    layer.classList.toggle("is-scan", id === "bmelo");
-    showBanner(name, id);
+  function onSection(_section) {
+    // セクションバナー・スキャンライン削除済み
   }
 
-  function showBanner(text, id) {
-    if (!text) return;
-    if (!bannerElement) {
-      bannerElement = document.createElement("div");
-      bannerElement.className = "pv-section-banner";
-      layer.appendChild(bannerElement);
+  // ── Step 1: typewriter ──────────────────────────────────────────
+  function applyTypewriter(phraseEl) {
+    const charSpans = Array.from(phraseEl.querySelectorAll(".pv-char"));
+    if (!charSpans.length) return;
+
+    const cursor = document.createElement("span");
+    cursor.className = "pv-cursor";
+    charSpans[0].before(cursor);
+
+    let i = 0;
+    const INTERVAL = 48;
+    const timer = setInterval(() => {
+      if (i < charSpans.length) {
+        charSpans[i].style.opacity = "1";
+        charSpans[i].after(cursor);
+        i += 1;
+      } else {
+        clearInterval(timer);
+        schedule(() => cursor.remove(), 200);
+      }
+    }, INTERVAL);
+    timers.add(timer);
+  }
+
+  // ── Step 2: pixel ───────────────────────────────────────────────
+  function applyPixel(phraseEl, text, color) {
+    phraseEl.style.visibility = "hidden";
+
+    const W = layer.clientWidth || window.innerWidth;
+    const H = layer.clientHeight || window.innerHeight;
+
+    const canvas = document.createElement("canvas");
+    canvas.className = "pv-pixel-canvas";
+    canvas.width = W;
+    canvas.height = H;
+    layer.appendChild(canvas);
+    const ctx = canvas.getContext("2d");
+
+    // offscreen でテキストをラスタライズ
+    const STEP = 4;
+    const off = new OffscreenCanvas(W, H);
+    const octx = off.getContext("2d");
+    const fontSize = Math.round(W * 0.055);
+    octx.font = `900 ${fontSize}px "Zen Kaku Gothic New", sans-serif`;
+    octx.fillStyle = "#fff";
+    octx.textAlign = "center";
+    octx.textBaseline = "middle";
+    octx.fillText(text, W / 2, H / 2);
+
+    const data = octx.getImageData(0, 0, W, H).data;
+    const dots = [];
+    for (let y = 0; y < H; y += STEP) {
+      for (let x = 0; x < W; x += STEP) {
+        if (data[(y * W + x) * 4 + 3] > 128) {
+          dots.push({
+            tx: x, ty: y,
+            x: Math.random() * W,
+            y: Math.random() * H,
+            vx: 0, vy: 0,
+          });
+        }
+      }
     }
-    bannerElement.textContent = text;
-    bannerElement.dataset.section = id;
-    bannerElement.classList.remove("show");
-    void bannerElement.offsetWidth; // reflow でアニメーションを再起動
-    bannerElement.classList.add("show");
-    window.clearTimeout(bannerTimer);
-    bannerTimer = window.setTimeout(() => bannerElement?.classList.remove("show"), 2200);
+
+    const SPRING = 0.14;
+    const DAMPING = 0.72;
+    let phase = "in";
+    let rafId = 0;
+
+    const tick = () => {
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = color;
+      for (const d of dots) {
+        const tx = phase === "out" ? d.tx + (Math.random() - 0.5) * W * 2 : d.tx;
+        const ty = phase === "out" ? d.ty + (Math.random() - 0.5) * H * 2 : d.ty;
+        d.vx = (d.vx + (tx - d.x) * SPRING) * DAMPING;
+        d.vy = (d.vy + (ty - d.y) * SPRING) * DAMPING;
+        d.x += d.vx;
+        d.y += d.vy;
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+
+    return function dissolve() {
+      phase = "out";
+      schedule(() => {
+        cancelAnimationFrame(rafId);
+        canvas.remove();
+      }, 800);
+    };
+  }
+
+  // ── Step 3: polygon ─────────────────────────────────────────────
+  function spawnPolygons(container, phraseEl) {
+    const SHAPES = [
+      "polygon(50% 0%, 0% 100%, 100% 100%)",
+      "polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%)",
+      "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)",
+    ];
+    const COUNT = 6;
+    const rect = phraseEl.getBoundingClientRect();
+    const base = container.getBoundingClientRect();
+    const polys = [];
+
+    for (let i = 0; i < COUNT; i += 1) {
+      const el = document.createElement("div");
+      const size = 16 + Math.random() * 24;
+      const ox = rect.left - base.left + Math.random() * rect.width - size / 2;
+      const oy = rect.top  - base.top  + Math.random() * rect.height - size / 2;
+      el.className = "pv-poly";
+      el.style.cssText = [
+        `width:${size}px`, `height:${size}px`,
+        `left:${ox}px`, `top:${oy}px`,
+        `clip-path:${SHAPES[i % SHAPES.length]}`,
+        `background:currentColor`,
+        `color:var(--pv-main,#fff)`,
+        `opacity:0`,
+        `--px:${(Math.random() - 0.5) * 120}px`,
+        `--py:${(Math.random() - 0.5) * 80}px`,
+        `--pr:${(Math.random() - 0.5) * 180}deg`,
+        `animation-delay:${i * 0.06}s`,
+      ].join(";");
+      container.appendChild(el);
+      polys.push(el);
+    }
+
+    return function dissolve() {
+      polys.forEach((p) => p.classList.add("is-out"));
+      schedule(() => polys.forEach((p) => p.remove()), 500);
+    };
+  }
+
+  // ── Step 4: particle（Three.js 側へ委譲）────────────────────────
+  function spawnParticle(text, color) {
+    const stage = window.ModelStage;
+    if (!stage?.spawnParticle) return null;
+    return stage.spawnParticle(text, color);
   }
 
   function reset() {
     timers.forEach((timer) => window.clearTimeout(timer));
     timers.clear();
-    window.clearTimeout(bannerTimer);
     activePhrases.splice(0, activePhrases.length);
     lastPhraseIndex = 0;
     wordHitIndex = 0;
@@ -151,8 +266,6 @@
     lastTone = "";
     lastWordLane = -1;
     lastTickDot = -1;
-    bannerElement = null;
-    layer.classList.remove("is-scan");
     layer.style.removeProperty("--pv-vocal");
     layer.replaceChildren();
   }
@@ -244,6 +357,7 @@
   function removePhrase(entry) {
     const index = activePhrases.indexOf(entry);
     if (index >= 0) activePhrases.splice(index, 1);
+    entry?.dissolve?.();
     if (!entry?.element?.isConnected) return;
 
     entry.element.classList.add("is-exiting");

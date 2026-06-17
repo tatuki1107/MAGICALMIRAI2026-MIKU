@@ -64,6 +64,8 @@ let phrasePulse = 0;
 let beatPulse = 0;
 let previousBeat = -1;
 let lastPhraseIndex = 0;
+let previousPlaying = false;
+let outroTriggered = false;
 
 // 表情モーフ (D-3) — モデルに morphTarget があれば歌唱に同期
 let morphMesh = null;
@@ -97,7 +99,7 @@ const tmpColor = new THREE.Color();
 // ── Stage spotlight rig ───────────────────────────────────────
 // ライブ会場風の可動スポット。被写体を照らしつつ拍/サビ/声量に反応して
 // 首を振り、色と輝度が脈動する。調整しやすいよう値は定数化。
-const SPOT_COUNT = 4;
+const SPOT_COUNT = 0;
 const SPOT = {
   baseIntensity: 16, // 1灯あたりの基準輝度(candela)
   beatBoost: 24, // 拍パルスで加算
@@ -147,7 +149,7 @@ const VIZ_MAX_LEN = 3.2; // 最大の伸び
 const vizValues = new Float32Array(VIZ_BARS);
 let vizGeo = null;
 
-const SHOOT_MAX = 7; // 流れ星の最大同時数
+const SHOOT_MAX = 18; // 流れ星の最大同時数
 const SHOOT_HIDDEN = -9999; // 非アクティブ時に視界外へ退避
 const shootState = [];
 let shootSpawnTimer = 0;
@@ -166,6 +168,9 @@ const shooting = buildShootingStars();
 scene.add(shooting.points);
 scene.add(shooting.lines);
 
+const OPENING_SHOT = { label: "Opening / Front", az: 0, orbit: 0, el0: 8, el1: 10, radius0: 5.8, radius1: 5.6, y: 1.22, fov: 40 };
+const OUTRO_SHOT   = { label: "Outro / Pull back", az: 0, orbit: 120, el0: 10, el1: 32, radius0: 5.8, radius1: 48.0, y: 1.22, fov: 58 };
+
 const SHOTS = [
   { label: "Shot 01 / Front rise", az: -18, orbit: 54, el0: 7, el1: 15, radius0: 7.0, radius1: 6.0, y: 1.18, fov: 42 },
   { label: "Shot 02 / Close face arc", az: 28, orbit: -32, el0: 12, el1: 18, radius0: 3.45, radius1: 3.0, y: 1.48, fov: 31 },
@@ -180,25 +185,140 @@ const SHOTS = [
 ];
 
 const cam = {
-  az: SHOTS[0].az,
-  el: SHOTS[0].el0,
-  radius: SHOTS[0].radius0,
+  az: OPENING_SHOT.az,
+  el: OPENING_SHOT.el0,
+  radius: OPENING_SHOT.radius0,
   x: 0,
-  y: SHOTS[0].y,
-  fov: SHOTS[0].fov,
+  y: OPENING_SHOT.y,
+  fov: OPENING_SHOT.fov,
 };
 
 let activeShot = {
-  ...SHOTS[0],
+  ...OPENING_SHOT,
   startedAt: performance.now(),
-  duration: 4200,
+  duration: 5000,
   from: { ...cam },
 };
+
+// ── パーティクルテキスト（Step 5） ─────────────────────────────────
+let activeParticle = null;
+
+class ParticleText {
+  constructor(text, color) {
+    this._phase = "in";
+    this._points = null;
+    this._targets = [];
+    this._build(text, color);
+  }
+
+  _build(text, color) {
+    const W = renderer.domElement.width  || 800;
+    const H = renderer.domElement.height || 600;
+    const STEP = 4;
+
+    const off = new OffscreenCanvas(W, H);
+    const ctx2d = off.getContext("2d");
+    const fontSize = Math.round(W * 0.055);
+    ctx2d.font = `900 ${fontSize}px "Zen Kaku Gothic New", sans-serif`;
+    ctx2d.fillStyle = "#fff";
+    ctx2d.textAlign = "center";
+    ctx2d.textBaseline = "middle";
+    ctx2d.fillText(text, W / 2, H / 2);
+
+    const data = ctx2d.getImageData(0, 0, W, H).data;
+    const targets = [];
+    for (let y = 0; y < H; y += STEP) {
+      for (let x = 0; x < W; x += STEP) {
+        if (data[(y * W + x) * 4 + 3] > 128) {
+          targets.push(
+            ((x / W) - 0.5) *  10,
+            ((y / H) - 0.5) * -6,
+            0,
+          );
+        }
+      }
+    }
+    this._targets = targets;
+
+    const count = targets.length / 3;
+    const positions = new Float32Array(count * 3);
+    const SPREAD = 6;
+    for (let i = 0; i < count; i += 1) {
+      positions[i * 3]     = (Math.random() - 0.5) * SPREAD * 10;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * SPREAD * 6;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * SPREAD;
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({
+      size: 0.06,
+      color: new THREE.Color(color),
+      transparent: true,
+      opacity: 1,
+      depthWrite: false,
+    });
+
+    this._points = new THREE.Points(geo, mat);
+    this._points.renderOrder = 1;
+    scene.add(this._points);
+  }
+
+  tick() {
+    if (!this._points) return;
+    const pos = this._points.geometry.attributes.position;
+    const LERP = this._phase === "out" ? 0.06 : 0.10;
+    for (let i = 0; i < pos.count; i += 1) {
+      const tx = this._phase === "out"
+        ? this._targets[i * 3]     + (Math.random() - 0.5) * 20
+        : this._targets[i * 3];
+      const ty = this._phase === "out"
+        ? this._targets[i * 3 + 1] + (Math.random() - 0.5) * 12
+        : this._targets[i * 3 + 1];
+      const tz = this._phase === "out"
+        ? this._targets[i * 3 + 2] + (Math.random() - 0.5) * 5
+        : this._targets[i * 3 + 2];
+      pos.array[i * 3]     += (tx - pos.array[i * 3])     * LERP;
+      pos.array[i * 3 + 1] += (ty - pos.array[i * 3 + 1]) * LERP;
+      pos.array[i * 3 + 2] += (tz - pos.array[i * 3 + 2]) * LERP;
+    }
+    pos.needsUpdate = true;
+  }
+
+  dissolve() {
+    this._phase = "out";
+    const mat = this._points?.material;
+    if (!mat) return;
+    const fade = setInterval(() => {
+      mat.opacity -= 0.05;
+      if (mat.opacity <= 0) {
+        clearInterval(fade);
+        this.destroy();
+      }
+    }, 30);
+  }
+
+  destroy() {
+    if (!this._points) return;
+    scene.remove(this._points);
+    this._points.geometry.dispose();
+    this._points.material.dispose();
+    this._points = null;
+  }
+}
 
 window.ModelStage = {
   onPhrase,
   onSection,
   reset,
+  spawnParticle(text, color) {
+    activeParticle?.destroy();
+    activeParticle = new ParticleText(text, color);
+    return function dissolve() {
+      activeParticle?.dissolve();
+      activeParticle = null;
+    };
+  },
 };
 
 loadModel();
@@ -281,13 +401,17 @@ function onPhrase(phrase) {
 }
 
 function reset() {
+  activeParticle?.destroy();
+  activeParticle = null;
   lastPhraseIndex = 0;
   activeShot = {
-    ...SHOTS[0],
+    ...OPENING_SHOT,
     startedAt: performance.now(),
-    duration: 4200,
+    duration: 5000,
     from: { ...cam },
   };
+  previousPlaying = false;
+  outroTriggered = false;
   phrasePulse = 0;
   sectionId = "intro";
   targetEnergy = SECTION_VIS.intro.energy;
@@ -299,7 +423,7 @@ function reset() {
     s.active = false;
   });
   shootSpawnTimer = 0;
-  shotName.textContent = SHOTS[0].label;
+  shotName.textContent = OPENING_SHOT.label;
 }
 
 function tick(now) {
@@ -307,6 +431,19 @@ function tick(now) {
 
   const dt = Math.min(clock.getDelta(), 0.05);
   const playing = !!state.isPlaying;
+
+  // 再生終了 → アウトロカメラ（正面からゆっくり引いていく）
+  if (previousPlaying && !playing && !outroTriggered && lastPhraseIndex > 0) {
+    outroTriggered = true;
+    activeShot = {
+      ...OUTRO_SHOT,
+      startedAt: performance.now(),
+      duration: 8000,
+      from: { ...cam },
+    };
+    shotName.textContent = OUTRO_SHOT.label;
+  }
+  previousPlaying = playing;
 
   if (state.phraseIndex && state.phraseIndex !== lastPhraseIndex) {
     onPhrase(state.phrase || { index: state.phraseIndex, startTime: 0, endTime: 3600 });
@@ -324,6 +461,8 @@ function tick(now) {
   beatPulse = Math.max(0, beatPulse - dt * 4.2);
   phrasePulse = Math.max(0, phrasePulse - dt * 1.7);
   ringPulse = Math.max(0, ringPulse - dt * 1.4);
+
+  activeParticle?.tick();
 
   updateMorphs(dt);
   updateCamera(now, dt);
@@ -764,7 +903,7 @@ function updateShootingStars(dt) {
     if (shootSpawnTimer <= 0) {
       const free = shootState.find((s) => !s.active);
       if (free) spawnShootingStar(free);
-      shootSpawnTimer = 0.35 + Math.random() * 0.55;
+      shootSpawnTimer = 0.12 + Math.random() * 0.22;
     }
   }
 
