@@ -412,7 +412,9 @@
     };
 
     elements.phrase.textContent = unit.text || "-";
+    console.log(`[phrase] ${(unit.startTime/1000).toFixed(1)}s - ${(unit.endTime/1000).toFixed(1)}s\t${unit.text}`);
     window.ModelStage?.onPhrase?.(state.phrase, now);
+    window.Lyrics3D?.onPhrase?.(unit, now);
     window.TextPV?.onPhrase?.(
       { ...state.phrase, isChorus: state.isChorus, words: collectWords(unit) },
       now,
