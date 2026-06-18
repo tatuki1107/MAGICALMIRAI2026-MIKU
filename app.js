@@ -25,7 +25,6 @@
   const $ = (selector) => document.querySelector(selector);
   const elements = {
     status: $("#status"),
-    phrase: $("#phrase"),
     songTitle: $("#songTitle"),
     artistName: $("#artistName"),
     position: $("#position"),
@@ -253,7 +252,7 @@
     elements.artistName.textContent = song && song.artist && song.artist.name ? song.artist.name : "Twinfield";
 
     if (!video.firstPhrase) {
-      elements.phrase.textContent = "No lyrics";
+      // phrase panel removed
     }
 
     disableTransport(false);
@@ -283,6 +282,7 @@
     state.isPlaying = false;
     setStatus("Stopped", "ready");
     addEvent("stop");
+    window.Lyrics3D?.onEnd?.();
     updatePosition(0);
     resetLiveState();
   }
@@ -411,8 +411,8 @@
       progress: clamp01(unit.progress(now)),
     };
 
-    elements.phrase.textContent = unit.text || "-";
     console.log(`[phrase] ${(unit.startTime/1000).toFixed(1)}s - ${(unit.endTime/1000).toFixed(1)}s\t${unit.text}`);
+    let w = unit.firstWord; while (w) { console.log(`  [word] ${(w.startTime/1000).toFixed(2)}s - ${(w.endTime/1000).toFixed(2)}s\t"${w.text}"`); w = w.next; }
     window.ModelStage?.onPhrase?.(state.phrase, now);
     window.Lyrics3D?.onPhrase?.(unit, now);
     window.TextPV?.onPhrase?.(
@@ -520,7 +520,6 @@
     lastPhraseStartTime = -1;
     lastWordStartTime = -1;
     lastCharStartTime = -1;
-    elements.phrase.textContent = "-";
     elements.songTitle.textContent = "TAKEOVER";
     elements.artistName.textContent = "Twinfield";
     elements.phraseCount.textContent = "phrases -";

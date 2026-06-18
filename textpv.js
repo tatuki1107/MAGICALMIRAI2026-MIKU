@@ -5,6 +5,12 @@
   const activePhrases = [];
   const timers = new Set();
   const MAX_PHRASES = 3;
+  const SPLIT_THRESHOLD = 9;
+  const PARTICLES = new Set([
+    'は','が','を','に','で','と','も','の','へ','や',
+    'より','から','まで','ばかり','だけ','しか','ので','けど',
+    'て','し','な','ね','よ','か','わ','って','ってな','じゃ',
+  ]);
   const MAX_WORD_HITS = 7;
   const MAX_CHAR_TICKS = 12;
 
@@ -294,13 +300,41 @@
     const mask = document.createElement("div");
     mask.className = "pv-mask";
 
-    const textWrap = document.createElement("div");
-    textWrap.className = "pv-text";
-    textWrap.dataset.text = text;
-    const hasKey = appendCharacters(textWrap, text, words);
-    if (hasKey) textWrap.classList.add("has-key");
+    const splitAt = findSplitChar(text, words);
+    let hasKey = false;
 
-    mask.appendChild(textWrap);
+    if (splitAt) {
+      const chars = [...text];
+      const line1 = chars.slice(0, splitAt).join("");
+      const line2 = chars.slice(splitAt).join("");
+      const [words1, words2] = splitWords(words, splitAt);
+
+      const rows = document.createElement("div");
+      rows.className = "pv-text-rows";
+
+      const tw1 = document.createElement("div");
+      tw1.className = "pv-text";
+      tw1.dataset.text = line1;
+      const hk1 = appendCharacters(tw1, line1, words1);
+      if (hk1) { tw1.classList.add("has-key"); hasKey = true; }
+
+      const tw2 = document.createElement("div");
+      tw2.className = "pv-text";
+      tw2.dataset.text = line2;
+      const hk2 = appendCharacters(tw2, line2, words2);
+      if (hk2) { tw2.classList.add("has-key"); hasKey = true; }
+
+      rows.appendChild(tw1);
+      rows.appendChild(tw2);
+      mask.appendChild(rows);
+    } else {
+      const textWrap = document.createElement("div");
+      textWrap.className = "pv-text";
+      textWrap.dataset.text = text;
+      hasKey = appendCharacters(textWrap, text, words);
+      if (hasKey) textWrap.classList.add("has-key");
+      mask.appendChild(textWrap);
+    }
     phrase.appendChild(mask);
 
     if (variant === "echo" || variant === "burst" || variant === "glitch") {
@@ -314,11 +348,15 @@
   // 文字を 1 つずつ span 化し、フレーズの「核」になる単語だけを強調する
   function appendCharacters(parent, text, words) {
     const keyRange = keyWordRange(text, words);
+    const particleMap = makeCharParticleMap(text, words);
     let charIndex = 0;
     [...text].forEach((char) => {
       const span = document.createElement("span");
       const isKey = keyRange && charIndex >= keyRange.start && charIndex < keyRange.end;
-      span.className = isKey ? "pv-char is-key" : "pv-char";
+      const classes = ["pv-char"];
+      if (isKey) classes.push("is-key");
+      if (particleMap[charIndex]) classes.push("is-particle");
+      span.className = classes.join(" ");
       span.textContent = char === " " ? " " : char;
       span.style.setProperty("--i", String(charIndex));
       span.style.setProperty("--char-tilt", `${-8 + (charIndex % 5) * 4}deg`);
@@ -326,6 +364,43 @@
       charIndex += 1;
     });
     return !!keyRange;
+  }
+
+  function makeCharParticleMap(text, words) {
+    const map = new Array([...text].length).fill(false);
+    if (!Array.isArray(words)) return map;
+    let cursor = 0;
+    for (const word of words) {
+      const len = [...word].length;
+      if (PARTICLES.has(word)) {
+        for (let i = 0; i < len; i++) map[cursor + i] = true;
+      }
+      cursor += len;
+    }
+    return map;
+  }
+
+  function findSplitChar(text, words) {
+    const total = [...text].length;
+    if (total <= SPLIT_THRESHOLD) return null;
+    if (!Array.isArray(words) || words.length === 0) return SPLIT_THRESHOLD;
+    let cursor = 0;
+    for (const word of words) {
+      cursor += [...word].length;
+      // 分割後の2行目が1文字以上かつ1行目が1文字以上になる境界のみ有効
+      if (cursor >= SPLIT_THRESHOLD && cursor < total) return cursor;
+    }
+    return null;
+  }
+
+  function splitWords(words, splitAt) {
+    if (!Array.isArray(words)) return [null, null];
+    let cursor = 0;
+    for (let i = 0; i < words.length; i++) {
+      cursor += [...words[i]].length;
+      if (cursor >= splitAt) return [words.slice(0, i + 1), words.slice(i + 1)];
+    }
+    return [words, []];
   }
 
   function appendEchoCopies(parent, text, variant) {

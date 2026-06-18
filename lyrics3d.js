@@ -1,655 +1,311 @@
-/**
- * lyrics3d.js — 3D Lyric PV Engine
- * TextAlive App API × Three.js
- * Pattern system: { patternId, params } based design
- */
+(() => {
+  'use strict';
 
-import * as THREE from 'three';
+  // ── Layer ─────────────────────────────────────────────────────
+  const layer = document.createElement('div');
+  layer.id = 'lyrics-special-layer';
+  layer.setAttribute('aria-hidden', 'true');
+  document.querySelector('.stage-shell')?.appendChild(layer);
 
-// ── Renderer ─────────────────────────────────────────────────
-const canvas = document.getElementById('lyrics3d-canvas');
-if (!canvas) throw new Error('lyrics3d-canvas not found');
 
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-renderer.setClearColor(0x000000, 0);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  // ── Styles ────────────────────────────────────────────────────
+  const style = document.createElement('style');
+  style.textContent = `
 
-const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 80);
-camera.position.set(0, 0, 9);
-camera.lookAt(0, 0, 0);
-
-function onResize() {
-  const w = canvas.clientWidth  || 1;
-  const h = canvas.clientHeight || 1;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
-}
-onResize();
-new ResizeObserver(onResize).observe(canvas.parentElement || canvas);
-
-// ── Font preload ──────────────────────────────────────────────
-document.fonts.load("900 72px 'Noto Sans JP'").catch(() => {});
-
-// ── Visible dimensions at z=0 ────────────────────────────────
-function visibleWidth() {
-  const fovRad = camera.fov * (Math.PI / 180);
-  return 2 * Math.tan(fovRad / 2) * camera.position.z * camera.aspect;
-}
-function visibleHeight() {
-  const fovRad = camera.fov * (Math.PI / 180);
-  return 2 * Math.tan(fovRad / 2) * camera.position.z;
-}
-
-// ── Easing ───────────────────────────────────────────────────
-const easeOut2 = t => 1 - (1 - t) ** 2;
-const easeOut4 = t => 1 - (1 - t) ** 4;
-const spring   = t => 1 + 2.5 * (t - 1) ** 3 + 1.5 * (t - 1) ** 2;
-const clamp    = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
-// ── Text mesh factory ────────────────────────────────────────
-function makeTextMesh(text, { meshHeight = 1.6, glowColor = '#39c5bb', textColor = '#ffffff' } = {}) {
-  const fs   = 76;
-  const font = `900 ${fs}px 'Noto Sans JP','Hiragino Kaku Gothic ProN',sans-serif`;
-
-  const tmp = document.createElement('canvas').getContext('2d');
-  tmp.font  = font;
-  const tw  = tmp.measureText(text).width;
-
-  const pad = fs * 0.55;
-  const W   = Math.ceil(tw + pad * 2);
-  const H   = Math.ceil(fs * 1.72);
-  const cvs = document.createElement('canvas');
-  cvs.width = W; cvs.height = H;
-  const ctx = cvs.getContext('2d');
-  ctx.font          = font;
-  ctx.textBaseline  = 'middle';
-  ctx.textAlign     = 'left';
-
-  // Dark outline (legibility without scrim)
-  ctx.shadowBlur    = 0;
-  ctx.strokeStyle   = '#020810';
-  ctx.lineWidth     = 7;
-  ctx.lineJoin      = 'round';
-  ctx.strokeText(text, pad, H / 2);
-  // Outer glow
-  ctx.shadowColor = glowColor;
-  ctx.shadowBlur  = 28;
-  ctx.fillStyle   = glowColor;
-  ctx.fillText(text, pad, H / 2);
-  // Mid glow
-  ctx.shadowBlur  = 12;
-  ctx.fillStyle   = textColor;
-  ctx.fillText(text, pad, H / 2);
-  // Sharp text
-  ctx.shadowBlur  = 0;
-  ctx.fillStyle   = textColor;
-  ctx.fillText(text, pad, H / 2);
-
-  const meshW = Math.max(1.5, (W / H) * meshHeight);
-  const geo   = new THREE.PlaneGeometry(meshW, meshHeight);
-  const tex   = new THREE.CanvasTexture(cvs);
-  const mat   = new THREE.MeshBasicMaterial({
-    map: tex,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.NormalBlending,
-  });
-  return { mesh: new THREE.Mesh(geo, mat), width: meshW, height: meshHeight };
-}
-
-// ── Vertical text mesh factory ───────────────────────────────
-const _LONG_VOWEL = new Set('ー');
-const _SMALL_KANA = new Set('っゃゅょぁぃぅぇぉッャュョァィゥェォ');
-const _PUNC_RIGHT = new Set('。、・');
-
-function makeVerticalTextMesh(text, { glowColor = '#39c5bb', textColor = '#ffffff' } = {}) {
-  const fs      = 76;
-  const font    = `900 ${fs}px 'Noto Sans JP','Hiragino Kaku Gothic ProN',sans-serif`;
-  const cell    = Math.ceil(fs * 1.15);
-  const padPx   = Math.ceil(fs * 0.35);
-  const chars   = [...text];
-  const W       = cell + padPx * 2;
-  const H       = chars.length * cell + padPx * 2;
-
-  const cvs     = document.createElement('canvas');
-  cvs.width = W; cvs.height = H;
-  const ctx     = cvs.getContext('2d');
-  ctx.font      = font;
-  ctx.textBaseline = 'middle';
-  ctx.textAlign    = 'center';
-  const cx = W / 2;
-
-  chars.forEach((ch, i) => {
-    const cy      = padPx + i * cell + cell / 2;
-    const isSmall = _SMALL_KANA.has(ch);
-    const isPunc  = _PUNC_RIGHT.has(ch);
-    const isLong  = _LONG_VOWEL.has(ch);
-    const ox      = (isSmall || isPunc) ?  cell * 0.18 : 0;
-    const oy      = (isSmall || isPunc) ? -cell * 0.18 : 0;
-
-    ctx.save();
-    if (isLong) {
-      ctx.translate(cx, cy);
-      ctx.rotate(Math.PI / 2);
-      ctx.shadowBlur  = 0;
-      ctx.strokeStyle = '#020810'; ctx.lineWidth = 7; ctx.lineJoin = 'round';
-      ctx.strokeText(ch, 0, 0);
-      ctx.shadowColor = glowColor; ctx.shadowBlur = 28;
-      ctx.fillStyle   = glowColor; ctx.fillText(ch, 0, 0);
-      ctx.shadowBlur  = 12; ctx.fillStyle = textColor; ctx.fillText(ch, 0, 0);
-      ctx.shadowBlur  = 0;  ctx.fillStyle = textColor; ctx.fillText(ch, 0, 0);
-    } else {
-      ctx.shadowBlur  = 0;
-      ctx.strokeStyle = '#020810'; ctx.lineWidth = 7; ctx.lineJoin = 'round';
-      ctx.strokeText(ch, cx + ox, cy + oy);
-      ctx.shadowColor = glowColor; ctx.shadowBlur = 28;
-      ctx.fillStyle   = glowColor; ctx.fillText(ch, cx + ox, cy + oy);
-      ctx.shadowBlur  = 12; ctx.fillStyle = textColor; ctx.fillText(ch, cx + ox, cy + oy);
-      ctx.shadowBlur  = 0;  ctx.fillStyle = textColor; ctx.fillText(ch, cx + ox, cy + oy);
+    #lyrics-special-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 20;
+      overflow: hidden;
     }
-    ctx.restore();
-  });
-
-  const cellWorld  = 1.4;
-  const meshHeight = chars.length * cellWorld;
-  const meshWidth  = meshHeight * (W / H);
-  const geo = new THREE.PlaneGeometry(meshWidth, meshHeight);
-  const tex = new THREE.CanvasTexture(cvs);
-  const mat = new THREE.MeshBasicMaterial({
-    map: tex, transparent: true, opacity: 0,
-    depthWrite: false, blending: THREE.NormalBlending,
-  });
-  return { mesh: new THREE.Mesh(geo, mat), width: meshWidth, height: meshHeight };
-}
-
-// ── Pattern definitions ───────────────────────────────────────
-// Each pattern: { init, in, active, out }
-// state = { mesh, params, ghosts, phaseStart, phase, ... }
-
-const P = {
-
-  /** A2: FlowThrough — 横から流れ込んで通過 */
-  A2: {
-    init(s) {
-      s.dir   = s.params.dir ?? 1;
-      s.baseY = s.params.y   ?? 0;
-      s.mesh.position.set(s.dir * 12, s.baseY, s.params.z ?? -1);
-      s.mesh.rotation.z = s.dir * 0.1;
-    },
-    in(s, t) {
-      const e = easeOut4(t);
-      s.mesh.position.x       = s.dir * 12 * (1 - e);
-      s.mesh.material.opacity = clamp(t * 3.5, 0, 1);
-      // スライドイン中は傾け、止まる瞬間に水平へ戻す
-      s.mesh.rotation.z       = s.dir * 0.1 * (1 - e);
-    },
-    active(s, _t, mb) {
-      s.mesh.rotation.z       = 0;
-      s.mesh.position.x      -= s.dir * 0.022 * 60;
-      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.09);
-    },
-    out(s, t) {
-      // 逆側へ加速して画面外へ抜ける
-      s.mesh.position.x      += s.dir * 0.022 * 60 * (2 + t * 4);
-      s.mesh.material.opacity = clamp(1 - t * 2.5, 0, 1);
-    },
-  },
-
-  /** A5: BlurFocus — ぼけから鮮明に（イントロ・落ちサビ） */
-  A5: {
-    init(s) {
-      s.baseY = s.params.y ?? 0;
-      s.mesh.position.set(0, s.baseY, -0.5);
-      s.mesh.scale.setScalar(1.7);
-    },
-    in(s, t) {
-      const e = easeOut4(t);
-      s.mesh.scale.setScalar(1.7 - e * 0.7);
-      s.mesh.material.opacity = e;
-      s.mesh.position.z       = -0.5 + e * 0.5;
-    },
-    active(s, _t) {
-      s.mesh.position.y       = s.baseY + Math.sin(performance.now() * 0.00085) * 0.13;
-      s.mesh.material.opacity = 0.92;
-    },
-    out(s, t) {
-      s.mesh.scale.setScalar(1 + t * 0.55);
-      s.mesh.material.opacity = 1 - easeOut2(t);
-    },
-  },
-
-  /** A6: ZoomIn — 奥から高速で迫る（サビ） */
-  A6: {
-    init(s) {
-      s.mesh.position.set(0, s.params.y ?? 0, -18);
-      s.mesh.scale.setScalar(0.2);
-    },
-    in(s, t) {
-      const e               = easeOut4(t);
-      s.mesh.position.z     = -18 + e * 18;
-      s.mesh.scale.setScalar(0.2 + e * 0.8);
-      s.mesh.material.opacity = clamp(t * 4, 0, 1);
-    },
-    active(s, _t, mb) {
-      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.16);
-      s.mesh.material.opacity = 1;
-    },
-    out(s, t) {
-      s.mesh.position.z      += t * 5;
-      s.mesh.material.opacity = 1 - easeOut4(t);
-    },
-  },
-
-  /** A3: CharPop — バネで跳ねて出現（英語フック） */
-  A3: {
-    init(s) {
-      s.mesh.position.set(s.params.x ?? 0, s.params.y ?? 0, 0.5);
-      s.mesh.scale.setScalar(0.04);
-    },
-    in(s, t) {
-      s.mesh.scale.setScalar(spring(clamp(t * 2.2, 0, 1)));
-      s.mesh.material.opacity = clamp(t * 7, 0, 1);
-    },
-    active(s, _t, mb) {
-      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.11);
-    },
-    out(s, t) {
-      s.mesh.material.opacity = 1 - easeOut4(t);
-      s.mesh.scale.setScalar(1 + t * 0.45);
-    },
-  },
-
-  /** A7: DropIn — 上から落下してバウンド */
-  A7: {
-    init(s) {
-      s.baseY = s.params.y ?? 0;
-      s.mesh.position.set(s.params.x ?? 0, s.baseY + 4.5, s.params.z ?? 0);
-    },
-    in(s, t) {
-      s.mesh.position.y       = s.baseY + 4.5 * (1 - spring(clamp(t * 1.3, 0, 1)));
-      s.mesh.material.opacity = clamp(t * 4, 0, 1);
-    },
-    active(s, _t, mb) {
-      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.09);
-    },
-    out(s, t) {
-      s.mesh.position.y      -= t * 4.5;
-      s.mesh.material.opacity = 1 - easeOut2(t);
-    },
-  },
-
-  /** A8: GlitchFlash — グリッチで点滅しながら出現 */
-  A8: {
-    init(s) {
-      s.baseX = s.params.x ?? 0;
-      s.baseY = s.params.y ?? 0;
-      s.mesh.position.set(s.baseX, s.baseY, 0);
-      s.mesh.material.opacity = 0;
-    },
-    in(s, t) {
-      const flicker = t < 0.65 ? (Math.floor(t * 14) % 2) : 1;
-      s.mesh.material.opacity = flicker;
-      if (t < 0.65) {
-        s.mesh.position.x = s.baseX + (Math.random() - 0.5) * 0.45 * (1 - t);
-        s.mesh.position.y = s.baseY + (Math.random() - 0.5) * 0.18;
-        s.mesh.scale.setScalar(0.92 + Math.random() * 0.16 * (1 - t));
-      } else {
-        s.mesh.position.x += (s.baseX - s.mesh.position.x) * 0.4;
-        s.mesh.position.y += (s.baseY - s.mesh.position.y) * 0.4;
-        s.mesh.scale.setScalar(1);
-        s.mesh.material.opacity = 1;
-      }
-    },
-    active(s, _t, mb) {
-      s.mesh.material.opacity = 0.96;
-      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.1);
-      if (Math.random() < 0.025) {
-        s.mesh.position.x = s.baseX + (Math.random() - 0.5) * 0.12;
-      } else {
-        s.mesh.position.x += (s.baseX - s.mesh.position.x) * 0.35;
-      }
-    },
-    out(s, t) {
-      s.mesh.material.opacity = 1 - t;
-      if (Math.random() < 0.08) s.mesh.position.x = s.baseX + (Math.random() - 0.5) * 0.3;
-    },
-  },
-
-  /** A9: SlideUp — 下から滑り上がる */
-  A9: {
-    init(s) {
-      s.baseY = s.params.y ?? 0;
-      s.mesh.position.set(s.params.x ?? 0, s.baseY - 3.8, s.params.z ?? 0);
-      s.mesh.material.opacity = 0;
-    },
-    in(s, t) {
-      s.mesh.position.y       = s.baseY - 3.8 * (1 - easeOut4(t));
-      s.mesh.material.opacity = clamp(t * 2.8, 0, 1);
-    },
-    active(s, _t, mb) {
-      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.08);
-    },
-    out(s, t) {
-      s.mesh.position.y      += t * 3.5;
-      s.mesh.material.opacity = 1 - easeOut2(t);
-    },
-  },
-
-  /** EMPH: EmphasisWord — サビ最長単語を中央で2倍サイズ強調 */
-  EMPH: {
-    init(s) {
-      s.mesh.position.set(0, 0, 0.5);
-      s.mesh.scale.setScalar(0.05);
-      s.mesh.material.opacity = 0;
-    },
-    in(s, t) {
-      s.mesh.scale.setScalar(spring(clamp(t * 2, 0, 1)));
-      s.mesh.material.opacity = clamp(t * 5, 0, 1);
-    },
-    active(s, _t, mb) {
-      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.13);
-      s.mesh.material.opacity = 1;
-    },
-    out(s, t) {
-      s.mesh.scale.setScalar(1 + t * 0.6);
-      s.mesh.material.opacity = 1 - easeOut4(t);
-    },
-  },
-
-  /** A10: TwistIn — 薄い板から展開する */
-  A10: {
-    init(s) {
-      s.baseY = s.params.y ?? 0;
-      s.mesh.position.set(s.params.x ?? 0, s.baseY, 0);
-      s.mesh.scale.set(1.35, 0.01, 1);
-      s.mesh.material.opacity = 0;
-    },
-    in(s, t) {
-      const e = spring(clamp(t * 1.4, 0, 1));
-      s.mesh.scale.set(1.35 - e * 0.35, clamp(e, 0.01, 1), 1);
-      s.mesh.material.opacity = clamp(t * 3, 0, 1);
-    },
-    active(s, _t, mb) {
-      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.1);
-    },
-    out(s, t) {
-      s.mesh.scale.set(1 + t * 0.3, clamp(1 - t * 1.6, 0.01, 1), 1);
-      s.mesh.material.opacity = 1 - easeOut2(t);
-    },
-  },
-  /** VERTICAL: 縦書きで画面左端/右端にフェードイン・フェードアウト */
-  VERTICAL: {
-    init(s) {
-      s.side  = s.params.side ?? 1;
-      const halfW = visibleWidth() / 2;
-      s.baseX = s.side * (halfW - (s.params.meshWidth ?? 1) / 2 - 0.15);
-      s.mesh.position.set(s.baseX, 0, 0);
-      s.mesh.material.opacity = 0;
-    },
-    in(s, t) {
-      s.mesh.material.opacity = clamp(t * 2.5, 0, 1);
-    },
-    active(s, _t) {
-      s.mesh.material.opacity = 1;
-    },
-    out(s, t) {
-      s.mesh.material.opacity = 1 - easeOut2(t);
-    },
-  },
-
-  /** SPIN: SpinIn — z軸1回転しながらフェードイン、正位置で止まる */
-  SPIN: {
-    init(s) {
-      s.baseY = s.params.y ?? 0;
-      s.mesh.position.set(0, s.baseY, s.params.z ?? 0);
-      s.mesh.rotation.z = Math.PI * 2;
-      s.mesh.material.opacity = 0;
-    },
-    in(s, t) {
-      const e = easeOut4(t);
-      s.mesh.rotation.z       = Math.PI * 2 * (1 - e);
-      s.mesh.material.opacity = clamp(t * 3, 0, 1);
-    },
-    active(s, _t, mb) {
-      s.mesh.rotation.z       = 0;
-      s.mesh.scale.setScalar(1 + (mb.beatProgress ?? 0) * 0.09);
-    },
-    out(s, t) {
-      s.mesh.material.opacity = clamp(1 - t * 2.5, 0, 1);
-    },
-  },
-};
-
-// Exit patterns
-const EXIT = {
-  B1: (s, t) => { s.mesh.position.z -= t * 9;   s.mesh.material.opacity = 1 - easeOut2(t); },
-  B2: (s, t) => { s.mesh.position.y -= t * 4.5; s.mesh.material.opacity = 1 - easeOut2(t); },
-  B3: (s, t) => { s.mesh.scale.setScalar(1 - easeOut2(t)); s.mesh.material.opacity = 1 - t; },
-  B4: (s, t) => { s.mesh.position.x += t * 6;   s.mesh.material.opacity = 1 - easeOut2(t); },
-  B5: (s, t) => { s.mesh.position.x -= t * 6;   s.mesh.material.opacity = 1 - easeOut2(t); },
-  B6: (s, t) => { s.mesh.material.opacity = 1 - t; },
-};
-
-// ── Emphasis word detection ───────────────────────────────────
-function findLongestWord(unit) {
-  const words = unit.words
-    ?? (unit.children ?? []).filter(c => c.text && /\S/.test(c.text));
-  if (!words || words.length === 0) return null;
-  let best = null, bestDur = 0;
-  for (const w of words) {
-    const dur = (w.endTime ?? 0) - (w.startTime ?? 0);
-    if (dur > bestDur) { bestDur = dur; best = w; }
-  }
-  return best && bestDur > 0 ? best : null;
-}
-
-// ── Section → Config resolver ────────────────────────────────
-let _dirToggle = 1;
-let _vertDir   = 1;
-const _ySlots  = [-1.2, 0, 1.2, -0.6, 0.6];
-let   _yIdx    = 0;
-let   _verseIdx = 0;
-let   _chorIdx  = 0;
-
-// Verse patterns: 4フレーズに1回 VERTICAL を挟む
-const VERSE_CFGS = [
-  (dir, y) => ({ pat: 'A2',       exit: 'B1', meshH: 1.5, glow: '#39c5bb', params: { dir, y } }),
-  (_,   y) => ({ pat: 'SPIN',     exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
-  (_,   y) => ({ pat: 'A9',       exit: 'B2', meshH: 1.5, glow: '#4488ff', params: { y } }),
-  ()       => ({ pat: 'VERTICAL', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { vertical: true } }),
-  (_,   y) => ({ pat: 'A8',       exit: 'B6', meshH: 1.6, glow: '#aaeeff', params: { y } }),
-  (_,   y) => ({ pat: 'SPIN',     exit: 'B6', meshH: 1.5, glow: '#aaeeff', params: { y } }),
-  (_,   y) => ({ pat: 'A10',      exit: 'B3', meshH: 1.5, glow: '#39c5bb', params: { y } }),
-  ()       => ({ pat: 'VERTICAL', exit: 'B6', meshH: 1.5, glow: '#4488ff', params: { vertical: true } }),
-  (_,   y) => ({ pat: 'A7',       exit: 'B2', meshH: 1.5, glow: '#88ffee', params: { y } }),
-  (_,   y) => ({ pat: 'SPIN',     exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
-  (_,   y) => ({ pat: 'A5',       exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y } }),
-  ()       => ({ pat: 'VERTICAL', exit: 'B6', meshH: 1.5, glow: '#88ffee', params: { vertical: true } }),
-];
-
-// Chorus patterns: 4種類をローテーション
-const CHORUS_CFGS = [
-  () => ({ pat: 'A6',  exit: 'B1', meshH: 2.2, glow: '#ff70cc', params: { y: 0 } }),
-  () => ({ pat: 'A3',  exit: 'B3', meshH: 2.0, glow: '#ff70cc', params: { y: 0 } }),
-  () => ({ pat: 'A7',  exit: 'B1', meshH: 2.2, glow: '#ffd166', params: { y: 0 } }),
-  () => ({ pat: 'A10', exit: 'B3', meshH: 2.0, glow: '#ff88cc', params: { y: 0 } }),
-];
-
-function resolveConfig(mb, songTime, unit) {
-  if (songTime < 12000) {                              // イントロ
-    return { pat: 'A5', exit: 'B6', meshH: 1.5, glow: '#39c5bb', params: { y: 0 } };
-  }
-  if (mb.isChorus) {                                   // サビ
-    const emphWord = unit ? findLongestWord(unit) : null;
-    if (emphWord) {
-      return { pat: 'EMPH', exit: 'B6', meshH: 3.2, glow: '#ff70cc', params: { emphWord } };
+    .lsp-word {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      font-family: 'Zen Kaku Gothic New', 'Noto Sans JP', sans-serif;
+      font-weight: 900;
+      color: #fff;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      will-change: opacity, transform, filter;
     }
-    return CHORUS_CFGS[_chorIdx++ % CHORUS_CFGS.length]();
-  }
-  // Aメロ・Bメロ
-  _dirToggle = -_dirToggle;
-  const y = _ySlots[_yIdx++ % _ySlots.length];
-  return VERSE_CFGS[_verseIdx++ % VERSE_CFGS.length](_dirToggle, y);
-}
-
-// ── Ghost trail ───────────────────────────────────────────────
-const GHOST_N = 5;
-
-function addGhosts(s) {
-  s.ghosts = [];
-  for (let i = 0; i < GHOST_N; i++) {
-    const g  = s.mesh.clone();
-    // Remove mesh children — ghosts don't need them
-    while (g.children.length > 0) g.remove(g.children[0]);
-    g.material = s.mesh.material.clone();
-    g.material.opacity = 0;
-    scene.add(g);
-    s.ghosts.push(g);
-  }
-}
-
-function updateGhosts(s) {
-  const p  = s.mesh.position;
-  const op = s.mesh.material.opacity;
-  const sc = s.mesh.scale;
-
-  for (let i = GHOST_N - 1; i >= 0; i--) {
-    const g = s.ghosts[i];
-    if (i === 0) {
-      g.position.lerp(p,  0.18);
-      g.scale.copy(sc);
-      g.material.opacity = op * 0.42;
-    } else {
-      g.position.lerp(s.ghosts[i - 1].position, 0.14);
-      g.scale.copy(s.ghosts[i - 1].scale);
-      g.material.opacity = s.ghosts[i - 1].material.opacity * 0.52;
+    @keyframes lsp-punch {
+      0%   { opacity: 0; transform: translate(-50%,-50%) scale(2.2); filter: blur(8px); }
+      18%  { opacity: 1; transform: translate(-50%,-50%) scale(0.92); filter: blur(0); }
+      55%  { opacity: 1; transform: translate(-50%,-50%) scale(1.0); }
+      85%  { opacity: 1; transform: translate(-50%,-50%) scale(1.0); }
+      100% { opacity: 0; transform: translate(-50%,-50%) scale(1.04); }
     }
-  }
-}
-
-function disposePhrase(s) {
-  scene.remove(s.mesh);
-  s.mesh.geometry.dispose();
-  s.mesh.material.map?.dispose();
-  s.mesh.material.dispose();
-  s.ghosts.forEach(g => { scene.remove(g); g.material.dispose(); });
-  s.dead = true;
-}
-
-// ── Phrase pool ───────────────────────────────────────────────
-const pool = [];
-
-function forceOutAll() {
-  for (const s of pool) {
-    if (!s.dead && s.phase !== 'out') {
-      s.phase = 'out';
-      s.t0    = performance.now();
+    @keyframes lsp-slide {
+      0%   { opacity: 0; transform: translate(-50%,-50%) translateY(28px) scale(0.85); }
+      22%  { opacity: 1; transform: translate(-50%,-50%) translateY(0)   scale(1.0);  }
+      75%  { opacity: 1; transform: translate(-50%,-50%) translateY(0)   scale(1.0);  }
+      100% { opacity: 0; transform: translate(-50%,-50%) translateY(-12px); }
     }
+    @keyframes lsp-flash {
+      0%   { opacity: 0; transform: translate(-50%,-50%) scaleX(2.5) scaleY(0.6); filter: blur(6px); }
+      20%  { opacity: 1; transform: translate(-50%,-50%) scale(1.0); filter: blur(0); }
+      70%  { opacity: 1; }
+      100% { opacity: 0; transform: translate(-50%,-50%) scale(1.08); }
+    }
+    @keyframes lsp-recede {
+      0%   { opacity: 1; transform: translate(-50%,-50%) scale(1);    filter: blur(0);    letter-spacing: 0.05em; }
+      60%  { opacity: 0.6; transform: translate(-50%,-50%) scale(0.38); filter: blur(1px);  letter-spacing: 0.3em; }
+      100% { opacity: 0;   transform: translate(-50%,-50%) scale(0.08); filter: blur(6px);  letter-spacing: 0.6em; }
+    }
+    @keyframes lsp-clap {
+      0%   { opacity: 0;   letter-spacing: 0.55em;  transform: translate(-50%,-50%) scale(0.82); filter: blur(3px); }
+      22%  { opacity: 1;   letter-spacing: -0.06em; transform: translate(-50%,-50%) scale(1.06); filter: blur(0) brightness(2.2); }
+      36%  { letter-spacing: 0.03em;  transform: translate(-50%,-50%) scale(0.97); filter: brightness(1); }
+      55%  { letter-spacing: 0.03em;  transform: translate(-50%,-50%) scale(1.0);  opacity: 1; }
+      85%  { opacity: 1; }
+      100% { opacity: 0;   transform: translate(-50%,-50%) scale(1.04); }
+    }
+
+
+    /* ── 通常フレーズ 左右分割ブロック ── */
+    .lsp-block {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      font-family: 'Zen Kaku Gothic New', 'Noto Sans JP', sans-serif;
+      font-weight: 900;
+      color: #fff;
+      line-height: 1.25;
+      pointer-events: none;
+      opacity: 0;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.08em;
+    }
+    .lsp-block--left  { left: 4%;  text-align: left;  justify-content: flex-start; max-width: 44%; }
+    .lsp-block--right { right: 4%; text-align: right; justify-content: flex-end;   max-width: 44%; }
+    .lsp-block .particle { color: inherit; }
+    .lsp-block .content  { color: inherit; }
+    @keyframes lsp-block-in-left {
+      0%   { opacity: 0; transform: translateY(-50%) translateX(-18px); }
+      30%  { opacity: 1; transform: translateY(-50%) translateX(0); }
+      80%  { opacity: 1; }
+      100% { opacity: 0; }
+    }
+    @keyframes lsp-block-in-right {
+      0%   { opacity: 0; transform: translateY(-50%) translateX(18px); }
+      30%  { opacity: 1; transform: translateY(-50%) translateX(0); }
+      80%  { opacity: 1; }
+      100% { opacity: 0; }
+    }
+  `;
+  document.head.appendChild(style);
+
+  // ── Utilities ─────────────────────────────────────────────────
+  const timers = [];
+
+  function clearAll() {
+    timers.forEach(id => clearTimeout(id));
+    timers.length = 0;
+    layer.innerHTML = '';
   }
-}
 
-function spawnPhrase(unit, songTimeMs) {
-  forceOutAll();
-  const mb  = window.MusicBG || {};
-  const cfg = resolveConfig(mb, songTimeMs, unit);
-  const dur = unit.endTime - unit.startTime;
-  const displayText = (cfg.params?.emphWord?.text ?? unit.text ?? '').toUpperCase();
-
-  let mesh, mw, mh;
-  if (cfg.params?.vertical) {
-    // 縦書き: 左右交互に配置
-    _vertDir = -_vertDir;
-    cfg.params.side = _vertDir;
-    ({ mesh, width: mw, height: mh } = makeVerticalTextMesh(displayText, { glowColor: cfg.glow }));
-    cfg.params.meshWidth = mw;
-  } else {
-    ({ mesh, width: mw, height: mh } = makeTextMesh(displayText, {
-      meshHeight: cfg.meshH,
-      glowColor:  cfg.glow,
-    }));
+  function schedule(fn, delayMs) {
+    timers.push(setTimeout(fn, Math.max(0, delayMs)));
   }
 
-  scene.add(mesh);
+  function getWords(unit) {
+    const words = [];
+    let w = unit.firstWord;
+    while (w) { words.push(w); w = w.next; }
+    return words;
+  }
 
-  // 幅・高さ両方で 90% に収まるよう clampScale を計算
-  const wAllow = visibleWidth()  * 0.9;
-  const hAllow = visibleHeight() * 0.9;
-  const clampScale = Math.min(
-    mw > wAllow ? wAllow / mw : 1,
-    mh > hAllow ? hAllow / mh : 1,
-  );
+  // ── Element spawner（特殊フレーズ用） ────────────────────────
+  function spawn({ text, delay, duration, fontSize, color, glow, anim = 'lsp-punch', offsetY = '0px' }) {
+    schedule(() => {
+      const el = document.createElement('div');
+      el.className = 'lsp-word';
+      el.textContent = text;
+      el.style.fontSize = fontSize;
+      el.style.color = color;
+      el.style.textShadow = `0 0 24px ${glow}, 0 0 60px ${glow}, 0 0 120px ${glow}`;
+      el.style.top = `calc(50% + ${offsetY})`;
+      el.style.animation = `${anim} ${duration}ms cubic-bezier(.22,.61,.36,1) forwards`;
+      layer.appendChild(el);
+      schedule(() => el.remove(), duration + 50);
+    }, delay);
+  }
 
-  const pat = P[cfg.pat] || P.A2;
-  const s   = {
-    mesh,
-    pattern: pat,
-    exitFn:  EXIT[cfg.exit] || EXIT.B6,
-    params:  cfg.params || {},
-    phase:   'in',
-    inDur:   dur * 0.18,
-    actDur:  dur * 0.64,
-    outDur:  dur * 0.18,
-    t0:      performance.now(),
-    dead:    false,
-    ghosts:  [],
-    clampScale,
-    meshWidth:  mw,
-    meshHeight: mh,
+  // ── 特殊フレーズ検出 ─────────────────────────────────────────
+  const TRIPLE_WORDS = ['Love', 'Wrap', 'Na'];
+
+  const TRIPLE_STYLE = {
+    Love: { color: '#ffb3e6', glow: '#ff5ca8', fontSize: '20vw' },
+    Wrap: { color: '#ffd166', glow: '#ff9900', fontSize: '20vw' },
+    Na:   { color: '#aaeeff', glow: '#4488ff', fontSize: '18vw' },
   };
 
-  pat.init(s);
-  addGhosts(s);
-  pool.push(s);
-}
+  function detectSpecial(words) {
+    if (!words.length) return null;
 
-// ── Public API ────────────────────────────────────────────────
-window.Lyrics3D = {
-  onPhrase(unit, songTimeMs) { spawnPhrase(unit, songTimeMs); },
-};
-
-// ── Render loop ───────────────────────────────────────────────
-let prevBeat = -1;
-
-(function tick() {
-  requestAnimationFrame(tick);
-  const now = performance.now();
-  const mb  = window.MusicBG || {};
-
-  if (mb.beatIndex !== prevBeat && mb.beatIndex >= 0) prevBeat = mb.beatIndex;
-
-  for (let i = pool.length - 1; i >= 0; i--) {
-    const s = pool[i];
-    if (s.dead) { pool.splice(i, 1); continue; }
-
-    const elapsed = now - s.t0;
-
-    if (s.phase === 'in') {
-      const t = clamp(elapsed / s.inDur, 0, 1);
-      s.pattern.in(s, t);
-      if (t >= 1) { s.phase = 'active'; s.t0 = now; }
-    } else if (s.phase === 'active') {
-      const t = clamp(elapsed / s.actDur, 0, 1);
-      s.pattern.active(s, t, mb);
-      if (t >= 1) { s.phase = 'out'; s.t0 = now; }
-    } else {
-      const t = clamp(elapsed / s.outDur, 0, 1);
-      s.exitFn(s, t);
-      if (t >= 1) { disposePhrase(s); continue; }
+    for (const target of TRIPLE_WORDS) {
+      const hits = words.filter(w => w.text === target);
+      if (hits.length >= 3) return { type: 'triple', word: target, hits };
     }
 
-    // Clamp scale so mesh stays within 90% of visible width and height (recalc each frame for resize)
-    const liveClamp = Math.min(
-      s.clampScale,
-      visibleWidth()  * 0.9 / s.meshWidth,
-      visibleHeight() * 0.9 / s.meshHeight,
-    );
-    if (s.mesh.scale.x > liveClamp) s.mesh.scale.multiplyScalar(liveClamp / s.mesh.scale.x);
-
-    updateGhosts(s);
+    return null;
   }
 
-  renderer.render(scene, camera);
+  // ── 特殊フレーズ ハンドラ ─────────────────────────────────────
+  function handleTriple({ word, hits }, songTimeMs) {
+    const s = TRIPLE_STYLE[word];
+    const anim = word === 'Clap' ? 'lsp-clap' : 'lsp-punch';
+    hits.slice(0, 4).forEach(w => {
+      const dur = Math.min((w.endTime - w.startTime) * 2.2, 480);
+      spawn({ text: word.toUpperCase(), delay: w.startTime - songTimeMs,
+        duration: Math.max(dur, 300), fontSize: s.fontSize,
+        color: s.color, glow: s.glow, anim });
+    });
+  }
+
+  // ── 通常フレーズ 左右分割ロジック ────────────────────────────
+
+  // 助詞リスト（完全一致判定）
+  const PARTICLES = new Set([
+    'は','が','を','に','で','と','も','の','へ','や',
+    'より','から','まで','ばかり','だけ','しか',
+    'ので','けど','て','も','し','な','ね','よ','か','わ',
+    'って','ってな','じゃ',
+  ]);
+
+  function isParticle(text) {
+    return PARTICLES.has(text);
+  }
+
+  // フレーズ文字数カウント（記号除外）
+  function countChars(words) {
+    return words.reduce((n, w) => n + [...w.text].filter(c => /\S/.test(c)).length, 0);
+  }
+
+  // 最大ギャップ位置を返す（インデックス i = words[i].endTime と words[i+1].startTime の間）
+  function findSplitIndex(words) {
+    let maxGap = -1;
+    let splitAt = -1;
+    for (let i = 0; i < words.length - 1; i++) {
+      const gap = words[i + 1].startTime - words[i].endTime;
+      if (gap > maxGap) { maxGap = gap; splitAt = i; }
+    }
+    return splitAt;
+  }
+
+  // 単語配列からブロック DOM を生成
+  function buildBlockEl(words, baseFontSize) {
+    const el = document.createElement('div');
+    words.forEach(w => {
+      const span = document.createElement('span');
+      span.textContent = w.text;
+      if (isParticle(w.text)) {
+        span.className = 'particle';
+        span.style.fontSize = `${baseFontSize * 0.62}vw`;
+        span.style.opacity = '0.7';
+      } else {
+        span.className = 'content';
+        span.style.fontSize = `${baseFontSize}vw`;
+      }
+      el.appendChild(span);
+    });
+    return el;
+  }
+
+  // 文字数に応じたベースフォントサイズ（vw）
+  function calcBaseFontSize(charCount) {
+    if (charCount <= 4)  return 9.0;
+    if (charCount <= 7)  return 7.5;
+    if (charCount <= 10) return 6.0;
+    if (charCount <= 14) return 5.0;
+    return 4.2;
+  }
+
+  function handleNormal(words, unit, songTimeMs) {
+    const charCount = countChars(words);
+    if (charCount < 9) return; // 8文字以下はスキップ
+
+    const splitAt = findSplitIndex(words);
+    if (splitAt < 0) return;
+
+    const front = words.slice(0, splitAt + 1);
+    const back  = words.slice(splitAt + 1);
+
+    // 極端な分割（片方が1単語だけ）は避ける
+    if (front.length < 2 || back.length < 2) return;
+
+    const frontCharCount = countChars(front);
+    const backCharCount  = countChars(back);
+    const baseFront = calcBaseFontSize(frontCharCount);
+    const baseBack  = calcBaseFontSize(backCharCount);
+
+    const phraseDur  = unit.endTime - unit.startTime;
+    const frontDelay = front[0].startTime - songTimeMs;
+    const backDelay  = back[0].startTime  - songTimeMs;
+    // アウト時刻: フレーズ終了時刻から少し前
+    const frontDur   = Math.max((unit.endTime - front[0].startTime) * 0.95, 300);
+    const backDur    = Math.max((unit.endTime - back[0].startTime)  * 0.95, 300);
+
+    const glow = '#39c5bb';
+    const textShadow = `0 0 18px ${glow}, 0 0 48px ${glow}`;
+
+    // 前半ブロック（左）
+    schedule(() => {
+      const el = buildBlockEl(front, baseFront);
+      el.className = 'lsp-block lsp-block--left';
+      el.style.textShadow = textShadow;
+      el.style.animation = `lsp-block-in-left ${frontDur}ms cubic-bezier(.22,.61,.36,1) forwards`;
+      layer.appendChild(el);
+      schedule(() => el.remove(), frontDur + 50);
+    }, frontDelay);
+
+    // 後半ブロック（右）
+    schedule(() => {
+      const el = buildBlockEl(back, baseBack);
+      el.className = 'lsp-block lsp-block--right';
+      el.style.textShadow = textShadow;
+      el.style.animation = `lsp-block-in-right ${backDur}ms cubic-bezier(.22,.61,.36,1) forwards`;
+      layer.appendChild(el);
+      schedule(() => el.remove(), backDur + 50);
+    }, backDelay);
+  }
+
+
+  // ── 曲終了 遠ざかり演出 ───────────────────────────────────────
+  function handleEnd() {
+    clearAll();
+    const el = document.createElement('div');
+    el.className = 'lsp-word';
+    el.textContent = 'TAKEOVER';
+    el.style.fontSize = '14vw';
+    el.style.color = '#ffffff';
+    el.style.textShadow = '0 0 24px #39c5bb, 0 0 80px #39c5bb, 0 0 160px #39c5bb';
+    el.style.letterSpacing = '0.05em';
+    el.style.opacity = '1';
+    el.style.animation = 'lsp-recede 3200ms cubic-bezier(.4,0,.8,1) forwards';
+    layer.appendChild(el);
+    schedule(() => el.remove(), 3300);
+  }
+
+  // ── Public API ────────────────────────────────────────────────
+  window.Lyrics3D = {
+    onEnd() { handleEnd(); },
+    onPhrase(unit, songTimeMs) {
+      clearAll();
+      const words = getWords(unit);
+      const special = detectSpecial(words);
+
+      if (special) {
+        switch (special.type) {
+          case 'triple': handleTriple(special, songTimeMs); break;
+        }
+      }
+    },
+  };
 })();
