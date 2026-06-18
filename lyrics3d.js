@@ -542,7 +542,17 @@ function disposePhrase(s) {
 // ── Phrase pool ───────────────────────────────────────────────
 const pool = [];
 
+function forceOutAll() {
+  for (const s of pool) {
+    if (!s.dead && s.phase !== 'out') {
+      s.phase = 'out';
+      s.t0    = performance.now();
+    }
+  }
+}
+
 function spawnPhrase(unit, songTimeMs) {
+  forceOutAll();
   const mb  = window.MusicBG || {};
   const cfg = resolveConfig(mb, songTimeMs, unit);
   const dur = unit.endTime - unit.startTime;
