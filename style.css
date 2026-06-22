@@ -89,7 +89,7 @@ input {
 .pv-typewriter {
   left: 4%;
   top: 42%;
-  max-width: min(58rem, 92%);
+  max-width: min(58rem, 92vw);
 }
 
 .pv-typewriter .pv-char {
@@ -113,7 +113,7 @@ input {
 .pv-vibrate {
   right: 4%;
   top: 48%;
-  max-width: min(54rem, 92%);
+  max-width: min(54rem, 88vw);
   transform: translateY(-50%);
 }
 
@@ -189,8 +189,10 @@ input {
   line-height: 0.96;
   filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.46));
   animation: pvPhraseHold var(--pv-duration, 3200ms) linear both;
-  /* translate は transform と別プロパティなので各 variant の動きと衝突せず着地点だけずらせる */
   translate: var(--pv-ox, 0) var(--pv-oy, 0);
+  /* 画面外への溢れ防止 */
+  max-width: min(94vw, 94%);
+  overflow: clip;
 }
 
 .pv-phrase.is-exiting {
@@ -283,17 +285,17 @@ input {
 
 .pv-short,
 .pv-short .pv-text {
-  font-size: 5.1rem;
+  font-size: clamp(2.2rem, 7vw, 5.5rem);
 }
 
 .pv-medium,
 .pv-medium .pv-text {
-  font-size: 4rem;
+  font-size: clamp(2rem, 5vw, 4.2rem);
 }
 
 .pv-long,
 .pv-long .pv-text {
-  font-size: 2.85rem;
+  font-size: clamp(1.5rem, 3.5vw, 3rem);
 }
 
 .pv-long .pv-text {
@@ -331,7 +333,7 @@ input {
 .pv-slide {
   left: 4%;
   top: 52%;
-  max-width: min(58rem, 92%);
+  max-width: min(58rem, 92vw);
   transform: translateX(-16px);
   animation: pvSlideDrift var(--pv-duration, 3200ms) ease-out both;
 }
@@ -356,8 +358,16 @@ input {
 .pv-vertical .pv-text {
   display: block;
   max-width: 10rem;
-  max-height: 27rem;
+  max-height: min(27rem, 65vh);
   writing-mode: vertical-rl;
+  overflow: hidden;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+}
+
+.pv-vertical .pv-text-rows {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.2em;
 }
 
 .pv-burst {
@@ -376,14 +386,14 @@ input {
 
 .pv-burst .pv-text {
   justify-content: center;
-  max-width: 24ch;
+  max-width: min(24ch, 88vw);
   transform: scale(1.04);
 }
 
 .pv-slash {
   right: 4%;
   top: 46%;
-  max-width: min(52rem, 90%);
+  max-width: min(52rem, 88vw);
   transform: translateY(-50%) rotate(var(--pv-angle, -8deg));
 }
 
@@ -395,14 +405,14 @@ input {
 .pv-echo {
   left: 9%;
   top: 10%;
-  max-width: min(54rem, 88%);
+  max-width: min(54rem, 88vw);
 }
 
 .pv-glitch {
   left: 50%;
   top: 46%;
   transform: translateX(-50%);
-  max-width: min(60rem, 90%);
+  max-width: min(60rem, 90vw);
 }
 
 .pv-glitch .pv-text {
@@ -937,6 +947,7 @@ button:disabled {
   opacity: 0.48;
 }
 
+
 #media {
   position: fixed;
   right: 16px;
@@ -954,25 +965,10 @@ button:disabled {
     inset: 82px 0 98px;
   }
 
-  .pv-short,
-  .pv-short .pv-text {
-    font-size: 3.35rem;
-  }
-
-  .pv-medium,
-  .pv-medium .pv-text {
-    font-size: 2.62rem;
-  }
-
-  .pv-long,
-  .pv-long .pv-text {
-    font-size: 1.86rem;
-  }
-
   .pv-slide,
   .pv-echo {
     left: 3%;
-    max-width: 94%;
+    max-width: 94vw;
   }
 
   .pv-vertical {
@@ -981,16 +977,17 @@ button:disabled {
   }
 
   .pv-vertical .pv-text {
-    max-height: 21rem;
+    max-height: min(21rem, 55vh);
+    font-size: clamp(1.5rem, 3.5vw, 2.6rem);
   }
 
   .pv-slash {
     right: 2%;
-    max-width: 94%;
+    max-width: 94vw;
   }
 
   .pv-glitch {
-    max-width: 94%;
+    max-width: 94vw;
   }
 
   .pv-word-hit {
@@ -1034,21 +1031,6 @@ button:disabled {
     inset: 90px 0 104px;
   }
 
-  .pv-short,
-  .pv-short .pv-text {
-    font-size: 2.52rem;
-  }
-
-  .pv-medium,
-  .pv-medium .pv-text {
-    font-size: 2rem;
-  }
-
-  .pv-long,
-  .pv-long .pv-text {
-    font-size: 1.42rem;
-  }
-
   .pv-text {
     max-width: none;
   }
@@ -1083,21 +1065,6 @@ button:disabled {
 @media (max-height: 560px) {
   .typography-layer {
     inset: 58px 0 82px;
-  }
-
-  .pv-short,
-  .pv-short .pv-text {
-    font-size: 2.8rem;
-  }
-
-  .pv-medium,
-  .pv-medium .pv-text {
-    font-size: 2.15rem;
-  }
-
-  .pv-long,
-  .pv-long .pv-text {
-    font-size: 1.52rem;
   }
 }
 

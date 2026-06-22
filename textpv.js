@@ -4,8 +4,9 @@
   const layer = document.getElementById("typography-layer");
   const activePhrases = [];
   const timers = new Set();
-  const MAX_PHRASES = 3;
+  const MAX_PHRASES = 1;
   const SPLIT_THRESHOLD = 9;
+  const VERTICAL_SPLIT_THRESHOLD = 8;
   const PARTICLES = new Set([
     'は','が','を','に','で','と','も','の','へ','や',
     'より','から','まで','ばかり','だけ','しか','ので','けど',
@@ -98,6 +99,7 @@
     } else if (variant === "polygon") {
       entry.dissolve = spawnPolygons(layer, phraseElement);
     } else if (variant === "particle") {
+      phraseElement.style.display = "none"; // 背景スコアボードのみ表示
       entry.dissolve = spawnParticle(text, color, duration);
     }
 
@@ -300,7 +302,7 @@
     const mask = document.createElement("div");
     mask.className = "pv-mask";
 
-    const splitAt = findSplitChar(text, words);
+    const splitAt = findSplitChar(text, words, variant === 'vertical' ? VERTICAL_SPLIT_THRESHOLD : SPLIT_THRESHOLD);
     let hasKey = false;
 
     if (splitAt) {
@@ -380,15 +382,15 @@
     return map;
   }
 
-  function findSplitChar(text, words) {
+  function findSplitChar(text, words, threshold = SPLIT_THRESHOLD) {
     const total = [...text].length;
-    if (total <= SPLIT_THRESHOLD) return null;
-    if (!Array.isArray(words) || words.length === 0) return SPLIT_THRESHOLD;
+    if (total <= threshold) return null;
+    if (!Array.isArray(words) || words.length === 0) return threshold;
     let cursor = 0;
     for (const word of words) {
       cursor += [...word].length;
       // 分割後の2行目が1文字以上かつ1行目が1文字以上になる境界のみ有効
-      if (cursor >= SPLIT_THRESHOLD && cursor < total) return cursor;
+      if (cursor >= threshold && cursor < total) return cursor;
     }
     return null;
   }

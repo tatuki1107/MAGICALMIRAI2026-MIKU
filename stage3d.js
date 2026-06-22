@@ -66,6 +66,7 @@ let previousBeat = -1;
 let lastPhraseIndex = 0;
 let previousPlaying = false;
 let outroTriggered = false;
+let lastSceneCueId = null;
 
 // 表情モーフ (D-3) — モデルに morphTarget があれば歌唱に同期
 let morphMesh = null;
@@ -184,6 +185,60 @@ const SHOTS = [
   { label: "Shot 10 / Long chase", az: 322, orbit: 68, el0: 3, el1: 10, radius0: 9.0, radius1: 7.2, y: 1.05, x: -0.28, fov: 52 },
 ];
 
+// ── S1〜S10 シーン別カメラキュー (ms) ────────────────────────────────
+// 冒頭イントロ〜サビ前まで、歌詞の意味と連動したカメラ演出を行う。
+// フレーズベースの自動切り替えより優先され、endMs を超えると通常システムに戻る。
+const SCENE_CUES = [
+  // S1: 暗転フェードイン → 顔のドアップ
+  { id: "S1",  startMs:  1300, endMs:  2400,
+    label: "S1 Face extreme",
+    az:   5, orbit:   8, el0: 16, el1: 18, radius0: 1.8, radius1: 1.6, y: 1.65, fov: 22, dur: 1500 },
+  // S1b: スクランブルランブル → バストショットへ引く
+  { id: "S1b", startMs:  2400, endMs:  3700,
+    label: "S1b Bust",
+    az:  15, orbit: -18, el0: 12, el1: 14, radius0: 2.8, radius1: 2.6, y: 1.42, fov: 28, dur: 1800 },
+  // S2: 斜め横から緩やかに回り込み
+  { id: "S2",  startMs:  3700, endMs:  6800,
+    label: "S2 Side arc",
+    az: -55, orbit:  70, el0:  6, el1: 12, radius0: 4.2, radius1: 3.8, y: 1.15, fov: 38, dur: 2500 },
+  // S3: 斜め構図を維持
+  { id: "S3",  startMs:  6800, endMs:  8840,
+    label: "S3 Diagonal",
+    az:  40, orbit: -30, el0:  8, el1: 12, radius0: 3.6, radius1: 3.2, y: 1.22, fov: 34, dur: 1200 },
+  // S3a: キューピッドアロー「矢を放つ」→ 正面・目線合わせ（一点のみ）
+  { id: "S3a", startMs:  8840, endMs:  9200,
+    label: "S3a Arrow snap",
+    az:   0, orbit:   0, el0:  8, el1:  8, radius0: 2.6, radius1: 2.6, y: 1.35, fov: 30, dur: 400 },
+  // S4: 光と影飲み込む → 俯瞰気味アングル
+  { id: "S4",  startMs:  9200, endMs: 12450,
+    label: "S4 High angle",
+    az: 150, orbit:  60, el0: 38, el1: 50, radius0: 6.0, radius1: 5.2, y: 1.18, fov: 46, dur: 1800 },
+  // S5: 調律されてる鼓動？→ 急接近（覚醒の境界線）
+  { id: "S5",  startMs: 12450, endMs: 13400,
+    label: "S5 Zoom in",
+    az:   8, orbit:  12, el0: 14, el1: 18, radius0: 1.7, radius1: 1.5, y: 1.62, fov: 20, dur: 600 },
+  // S6: くだらない言葉吹き飛ばす → 横移動・躍動感
+  { id: "S6",  startMs: 13400, endMs: 15200,
+    label: "S6 Side slide",
+    az: -75, orbit:  80, el0:  5, el1: 10, radius0: 4.0, radius1: 3.6, y: 1.10, fov: 38, dur: 900 },
+  // S7: 私たちは世界を変える → 煽りカメラ（ローアングル）
+  { id: "S7",  startMs: 15200, endMs: 17400,
+    label: "S7 低アングル煽り",
+    az:  10, orbit: -20, el0: -12, el1: -6, radius0: 3.2, radius1: 2.8, y: 0.5, fov: 44, dur: 1000 },
+  // S8: さあアップ＆ダウン → ダイナミック広角
+  { id: "S8",  startMs: 17400, endMs: 20200,
+    label: "S8 Dynamic wide",
+    az: -120, orbit: 100, el0:  5, el1: 14, radius0: 6.5, radius1: 5.5, y: 1.10, fov: 50, dur: 1500 },
+  // S9: このリアル掌返して → 180°ターン
+  { id: "S9",  startMs: 20200, endMs: 22500,
+    label: "S9 180ターン",
+    az: 175, orbit: 185, el0:  8, el1: 12, radius0: 3.8, radius1: 3.5, y: 1.20, fov: 38, dur: 800 },
+  // S10: 皆テイクオーバー → 初フルショット（最大引き）
+  { id: "S10", startMs: 22500, endMs: 24000,
+    label: "S10 First full shot",
+    az:   5, orbit:  20, el0:  4, el1:  8, radius0: 8.5, radius1: 7.8, y: 1.00, fov: 52, dur: 700 },
+];
+
 const cam = {
   az: OPENING_SHOT.az,
   el: OPENING_SHOT.el0,
@@ -203,108 +258,118 @@ let activeShot = {
 // ── パーティクルテキスト（Step 5） ─────────────────────────────────
 let activeParticle = null;
 
-class ParticleText {
-  constructor(text, color) {
-    this._phase = "in";
-    this._points = null;
-    this._targets = [];
-    this._build(text, color);
+function drawSpacedText(ctx, text, cx, cy, spacing) {
+  const chars = [...text];
+  const widths = chars.map((c) => ctx.measureText(c).width);
+  const total = widths.reduce((s, w) => s + w, 0) + spacing * Math.max(0, chars.length - 1);
+  let x = cx - total / 2;
+  for (let i = 0; i < chars.length; i += 1) {
+    ctx.fillText(chars[i], x + widths[i] / 2, cy);
+    x += widths[i] + spacing;
   }
+}
 
-  _build(text, color) {
-    const W = renderer.domElement.width  || 800;
-    const H = renderer.domElement.height || 600;
-    const STEP = 4;
+function spawnBgBoard(text, color) {
+  const col = color || "#39c5bb";
+  let mesh = null, geo = null, mat = null, tex = null, cv = null, ctx = null;
+  let dissolved = false;
+  let rafId = 0;
 
-    const off = new OffscreenCanvas(W, H);
-    const ctx2d = off.getContext("2d");
-    const fontSize = Math.round(W * 0.055);
-    ctx2d.font = `900 ${fontSize}px "Zen Kaku Gothic New", sans-serif`;
-    ctx2d.fillStyle = "#fff";
-    ctx2d.textAlign = "center";
-    ctx2d.textBaseline = "middle";
-    ctx2d.fillText(text, W / 2, H / 2);
+  const cleanup = () => {
+    cancelAnimationFrame(rafId);
+    if (mesh) scene.remove(mesh);
+    geo?.dispose(); mat?.dispose(); tex?.dispose();
+    mesh = geo = mat = tex = cv = ctx = null;
+  };
 
-    const data = ctx2d.getImageData(0, 0, W, H).data;
-    const targets = [];
-    for (let y = 0; y < H; y += STEP) {
-      for (let x = 0; x < W; x += STEP) {
-        if (data[(y * W + x) * 4 + 3] > 128) {
-          targets.push(
-            ((x / W) - 0.5) *  10,
-            ((y / H) - 0.5) * -6,
-            0,
-          );
-        }
+  const build = () => {
+    const H = 160;
+    const SPACING = 24;
+    const FONT_FAMILY = `"DotGothic16", sans-serif`;
+    let fontSize = 72;
+
+    const mctx = document.createElement("canvas").getContext("2d");
+    const measureW = (fs) => {
+      mctx.font = `${fs}px ${FONT_FAMILY}`;
+      const ws = [...text].map((c) => mctx.measureText(c).width);
+      return ws.reduce((s, w) => s + w, 0) + SPACING * Math.max(0, ws.length - 1);
+    };
+
+    const MAX_PLANE_W = 9.0;
+    const MAX_CANVAS_W = Math.floor((MAX_PLANE_W / 1.2) * H);
+    while (measureW(fontSize) > MAX_CANVAS_W - 80 && fontSize > 24) fontSize -= 4;
+
+    const textW = measureW(fontSize);
+    const W = Math.min(Math.ceil(textW) + 100, MAX_CANVAS_W);
+    const chars = [...text];
+
+    cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    ctx = cv.getContext("2d");
+
+    const redraw = (count) => {
+      ctx.clearRect(0, 0, W, H);
+      if (count === 0) { tex.needsUpdate = true; return; }
+      ctx.font = `${fontSize}px ${FONT_FAMILY}`;
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = col;
+      ctx.shadowColor = col;
+      ctx.shadowBlur = 18;
+      ctx.globalAlpha = 0.88;
+      drawSpacedText(ctx, chars.slice(0, count).join(""), W / 2, H / 2, SPACING);
+      tex.needsUpdate = true;
+    };
+
+    tex = new THREE.CanvasTexture(cv);
+    const planeW = (W / H) * 1.2;
+    geo = new THREE.PlaneGeometry(planeW, 1.2);
+    mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(0, modelCenterY + 0.15, -1.5);
+    scene.add(mesh);
+
+    // ── タイプインアニメーション ─────────────────────────────────
+    let visibleCount = 0;
+    const CHAR_MS = Math.max(40, Math.min(100, 700 / chars.length));
+    let lastCharAt = performance.now();
+
+    const typeLoop = (now) => {
+      if (!mat) return;
+      const newChars = Math.floor((now - lastCharAt) / CHAR_MS);
+      if (newChars > 0) {
+        visibleCount = Math.min(visibleCount + newChars, chars.length);
+        lastCharAt = now;
+        redraw(visibleCount);
       }
-    }
-    this._targets = targets;
+      if (visibleCount < chars.length) {
+        rafId = requestAnimationFrame(typeLoop);
+      }
+    };
+    rafId = requestAnimationFrame(typeLoop);
+  };
 
-    const count = targets.length / 3;
-    const positions = new Float32Array(count * 3);
-    const SPREAD = 6;
-    for (let i = 0; i < count; i += 1) {
-      positions[i * 3]     = (Math.random() - 0.5) * SPREAD * 10;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * SPREAD * 6;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * SPREAD;
-    }
+  document.fonts.load(`72px "DotGothic16"`).then(() => {
+    if (!dissolved) build();
+  });
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({
-      size: 0.06,
-      color: new THREE.Color(color),
-      transparent: true,
-      opacity: 1,
-      depthWrite: false,
-    });
-
-    this._points = new THREE.Points(geo, mat);
-    this._points.renderOrder = 1;
-    scene.add(this._points);
-  }
-
-  tick() {
-    if (!this._points) return;
-    const pos = this._points.geometry.attributes.position;
-    const LERP = this._phase === "out" ? 0.06 : 0.10;
-    for (let i = 0; i < pos.count; i += 1) {
-      const tx = this._phase === "out"
-        ? this._targets[i * 3]     + (Math.random() - 0.5) * 20
-        : this._targets[i * 3];
-      const ty = this._phase === "out"
-        ? this._targets[i * 3 + 1] + (Math.random() - 0.5) * 12
-        : this._targets[i * 3 + 1];
-      const tz = this._phase === "out"
-        ? this._targets[i * 3 + 2] + (Math.random() - 0.5) * 5
-        : this._targets[i * 3 + 2];
-      pos.array[i * 3]     += (tx - pos.array[i * 3])     * LERP;
-      pos.array[i * 3 + 1] += (ty - pos.array[i * 3 + 1]) * LERP;
-      pos.array[i * 3 + 2] += (tz - pos.array[i * 3 + 2]) * LERP;
-    }
-    pos.needsUpdate = true;
-  }
-
-  dissolve() {
-    this._phase = "out";
-    const mat = this._points?.material;
+  return function dissolveBoard() {
+    dissolved = true;
+    cancelAnimationFrame(rafId);
     if (!mat) return;
-    const fade = setInterval(() => {
-      mat.opacity -= 0.05;
-      if (mat.opacity <= 0) {
-        clearInterval(fade);
-        this.destroy();
-      }
-    }, 30);
-  }
 
-  destroy() {
-    if (!this._points) return;
-    scene.remove(this._points);
-    this._points.geometry.dispose();
-    this._points.material.dispose();
-    this._points = null;
-  }
+    // ── 左へ流れながらフェードアウト ────────────────────────────
+    const flowOut = () => {
+      if (!mat) return;
+      mesh.position.x -= 0.15;
+      mat.opacity = Math.max(0, mat.opacity - 0.022);
+      if (mat.opacity > 0) {
+        rafId = requestAnimationFrame(flowOut);
+      } else {
+        cleanup();
+      }
+    };
+    rafId = requestAnimationFrame(flowOut);
+  };
 }
 
 window.ModelStage = {
@@ -312,10 +377,10 @@ window.ModelStage = {
   onSection,
   reset,
   spawnParticle(text, color) {
-    activeParticle?.destroy();
-    activeParticle = new ParticleText(text, color);
+    activeParticle?.dissolve?.();
+    activeParticle = { dissolve: spawnBgBoard(text, color) };
     return function dissolve() {
-      activeParticle?.dissolve();
+      activeParticle?.dissolve?.();
       activeParticle = null;
     };
   },
@@ -401,7 +466,7 @@ function onPhrase(phrase) {
 }
 
 function reset() {
-  activeParticle?.destroy();
+  activeParticle?.dissolve?.();
   activeParticle = null;
   lastPhraseIndex = 0;
   activeShot = {
@@ -412,6 +477,7 @@ function reset() {
   };
   previousPlaying = false;
   outroTriggered = false;
+  lastSceneCueId = null;
   phrasePulse = 0;
   sectionId = "intro";
   targetEnergy = SECTION_VIS.intro.energy;
@@ -445,8 +511,38 @@ function tick(now) {
   }
   previousPlaying = playing;
 
-  if (state.phraseIndex && state.phraseIndex !== lastPhraseIndex) {
-    onPhrase(state.phrase || { index: state.phraseIndex, startTime: 0, endTime: 3600 });
+  // シーン別カメラキュー (S1-S10): 時間ベースで activeShot を決定
+  {
+    const posMs = state.position || 0;
+    const cue = playing && posMs > 0
+      ? SCENE_CUES.find(c => posMs >= c.startMs && posMs < c.endMs) ?? null
+      : null;
+    const cueId = cue ? cue.id : null;
+    if (cueId !== lastSceneCueId) {
+      lastSceneCueId = cueId;
+      if (cue) {
+        activeShot = {
+          label: cue.label,
+          az: cue.az, orbit: cue.orbit,
+          el0: cue.el0, el1: cue.el1,
+          radius0: cue.radius0, radius1: cue.radius1,
+          y: cue.y, fov: cue.fov,
+          startedAt: performance.now(),
+          duration: cue.dur,
+          from: { ...cam },
+        };
+        shotName.textContent = cue.label;
+      }
+    }
+
+    // フレーズ切り替え: シーンキュー有効中は抑制（インデックスだけ同期してずれを防ぐ）
+    if (state.phraseIndex && state.phraseIndex !== lastPhraseIndex) {
+      if (!cue) {
+        onPhrase(state.phrase || { index: state.phraseIndex, startTime: 0, endTime: 3600 });
+      } else {
+        lastPhraseIndex = state.phraseIndex;
+      }
+    }
   }
 
   if (mixer) {
@@ -462,7 +558,7 @@ function tick(now) {
   phrasePulse = Math.max(0, phrasePulse - dt * 1.7);
   ringPulse = Math.max(0, ringPulse - dt * 1.4);
 
-  activeParticle?.tick();
+  // activeParticle は CSS ベースに変更したため tick 不要
 
   updateMorphs(dt);
   updateCamera(now, dt);

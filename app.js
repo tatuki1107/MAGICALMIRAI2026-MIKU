@@ -288,6 +288,7 @@
   }
 
   function onTimeUpdate(position) {
+    state.position = position;
     updatePosition(position);
     updateBeat(position);
     updateHarmony(position);
