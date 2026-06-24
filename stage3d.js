@@ -64,6 +64,32 @@ let phrasePulse = 0;
 let beatPulse = 0;
 let previousBeat = -1;
 let lastPhraseIndex = 0;
+let previousPlaying = false;
+let outroTriggered = false;
+let lastSceneCueId = null;
+
+// 表情モーフ (D-3) — モデルに morphTarget があれば歌唱に同期
+let morphMesh = null;
+const morph = { mouth: -1, blink: -1, smile: -1 };
+let mouthValue = 0;
+let blinkValue = 0;
+let blinkTimer = 1.5;
+
+// セクション演出 (D-4/D-5) — app.js の section に追従
+const SECTION_VIS = {
+  intro: { energy: 0.1, motif: 0.2 },
+  amelo: { energy: 0.3, motif: 0.25 },
+  bmelo: { energy: 0.5, motif: 0.6 },
+  chorus: { energy: 1.0, motif: 0.8 },
+  interlude: { energy: 0.45, motif: 1.0 },
+  finale: { energy: 1.0, motif: 1.0 },
+};
+let sectionId = "intro";
+let sectionEnergy = 0; // 0=静 .. 1=最高潮
+let targetEnergy = 0.1;
+let motifIntensity = 0; // 信号モチーフ強度 0..1
+let targetMotif = 0.2;
+let ringPulse = 0;
 
 // 表情モーフ (D-3) — モデルに morphTarget があれば歌唱に同期
 let morphMesh = null;
@@ -97,7 +123,7 @@ const tmpColor = new THREE.Color();
 // ── Stage spotlight rig ───────────────────────────────────────
 // ライブ会場風の可動スポット。被写体を照らしつつ拍/サビ/声量に反応して
 // 首を振り、色と輝度が脈動する。調整しやすいよう値は定数化。
-const SPOT_COUNT = 4;
+const SPOT_COUNT = 0;
 const SPOT = {
   baseIntensity: 16, // 1灯あたりの基準輝度(candela)
   beatBoost: 24, // 拍パルスで加算
@@ -147,7 +173,7 @@ const VIZ_MAX_LEN = 3.2; // 最大の伸び
 const vizValues = new Float32Array(VIZ_BARS);
 let vizGeo = null;
 
-const SHOOT_MAX = 7; // 流れ星の最大同時数
+const SHOOT_MAX = 18; // 流れ星の最大同時数
 const SHOOT_HIDDEN = -9999; // 非アクティブ時に視界外へ退避
 const shootState = [];
 let shootSpawnTimer = 0;
@@ -166,6 +192,9 @@ const shooting = buildShootingStars();
 scene.add(shooting.points);
 scene.add(shooting.lines);
 
+const OPENING_SHOT = { label: "Opening / Front", az: 0, orbit: 0, el0: 8, el1: 10, radius0: 5.8, radius1: 5.6, y: 1.22, fov: 40 };
+const OUTRO_SHOT   = { label: "Outro / Pull back", az: 0, orbit: 120, el0: 10, el1: 32, radius0: 5.8, radius1: 48.0, y: 1.22, fov: 58 };
+
 const SHOTS = [
   { label: "Shot 01 / Front rise", az: -18, orbit: 54, el0: 7, el1: 15, radius0: 7.0, radius1: 6.0, y: 1.18, fov: 42 },
   { label: "Shot 02 / Close face arc", az: 28, orbit: -32, el0: 12, el1: 18, radius0: 3.45, radius1: 3.0, y: 1.48, fov: 31 },
@@ -179,26 +208,205 @@ const SHOTS = [
   { label: "Shot 10 / Long chase", az: 322, orbit: 68, el0: 3, el1: 10, radius0: 9.0, radius1: 7.2, y: 1.05, x: -0.28, fov: 52 },
 ];
 
+// ── S1〜S10 シーン別カメラキュー (ms) ────────────────────────────────
+// 冒頭イントロ〜サビ前まで、歌詞の意味と連動したカメラ演出を行う。
+// フレーズベースの自動切り替えより優先され、endMs を超えると通常システムに戻る。
+const SCENE_CUES = [
+  // S1: 暗転フェードイン → 顔のドアップ
+  { id: "S1",  startMs:  1300, endMs:  2400,
+    label: "S1 Face extreme",
+    az:   5, orbit:   8, el0: 16, el1: 18, radius0: 1.8, radius1: 1.6, y: 1.65, fov: 22, dur: 1500 },
+  // S1b: スクランブルランブル → バストショットへ引く
+  { id: "S1b", startMs:  2400, endMs:  3700,
+    label: "S1b Bust",
+    az:  15, orbit: -18, el0: 12, el1: 14, radius0: 2.8, radius1: 2.6, y: 1.42, fov: 28, dur: 1800 },
+  // S2: 斜め横から緩やかに回り込み
+  { id: "S2",  startMs:  3700, endMs:  6800,
+    label: "S2 Side arc",
+    az: -55, orbit:  70, el0:  6, el1: 12, radius0: 4.2, radius1: 3.8, y: 1.15, fov: 38, dur: 2500 },
+  // S3: 斜め構図を維持
+  { id: "S3",  startMs:  6800, endMs:  8840,
+    label: "S3 Diagonal",
+    az:  40, orbit: -30, el0:  8, el1: 12, radius0: 3.6, radius1: 3.2, y: 1.22, fov: 34, dur: 1200 },
+  // S3a: キューピッドアロー「矢を放つ」→ 正面・目線合わせ（一点のみ）
+  { id: "S3a", startMs:  8840, endMs:  9200,
+    label: "S3a Arrow snap",
+    az:   0, orbit:   0, el0:  8, el1:  8, radius0: 2.6, radius1: 2.6, y: 1.35, fov: 30, dur: 400 },
+  // S4: 光と影飲み込む → 俯瞰気味アングル
+  { id: "S4",  startMs:  9200, endMs: 12450,
+    label: "S4 High angle",
+    az: 150, orbit:  60, el0: 38, el1: 50, radius0: 6.0, radius1: 5.2, y: 1.18, fov: 46, dur: 1800 },
+  // S5: 調律されてる鼓動？→ 急接近（覚醒の境界線）
+  { id: "S5",  startMs: 12450, endMs: 13400,
+    label: "S5 Zoom in",
+    az:   8, orbit:  12, el0: 14, el1: 18, radius0: 1.7, radius1: 1.5, y: 1.62, fov: 20, dur: 600 },
+  // S6: くだらない言葉吹き飛ばす → 横移動・躍動感
+  { id: "S6",  startMs: 13400, endMs: 15200,
+    label: "S6 Side slide",
+    az: -75, orbit:  80, el0:  5, el1: 10, radius0: 4.0, radius1: 3.6, y: 1.10, fov: 38, dur: 900 },
+  // S7: 私たちは世界を変える → 煽りカメラ（ローアングル）
+  { id: "S7",  startMs: 15200, endMs: 17400,
+    label: "S7 低アングル煽り",
+    az:  10, orbit: -20, el0: -12, el1: -6, radius0: 3.2, radius1: 2.8, y: 0.5, fov: 44, dur: 1000 },
+  // S8: さあアップ＆ダウン → ダイナミック広角
+  { id: "S8",  startMs: 17400, endMs: 20200,
+    label: "S8 Dynamic wide",
+    az: -120, orbit: 100, el0:  5, el1: 14, radius0: 6.5, radius1: 5.5, y: 1.10, fov: 50, dur: 1500 },
+  // S9: このリアル掌返して → 180°ターン
+  { id: "S9",  startMs: 20200, endMs: 22500,
+    label: "S9 180ターン",
+    az: 175, orbit: 185, el0:  8, el1: 12, radius0: 3.8, radius1: 3.5, y: 1.20, fov: 38, dur: 800 },
+  // S10: 皆テイクオーバー → 初フルショット（最大引き）
+  { id: "S10", startMs: 22500, endMs: 24000,
+    label: "S10 First full shot",
+    az:   5, orbit:  20, el0:  4, el1:  8, radius0: 8.5, radius1: 7.8, y: 1.00, fov: 52, dur: 700 },
+];
+
 const cam = {
-  az: SHOTS[0].az,
-  el: SHOTS[0].el0,
-  radius: SHOTS[0].radius0,
+  az: OPENING_SHOT.az,
+  el: OPENING_SHOT.el0,
+  radius: OPENING_SHOT.radius0,
   x: 0,
-  y: SHOTS[0].y,
-  fov: SHOTS[0].fov,
+  y: OPENING_SHOT.y,
+  fov: OPENING_SHOT.fov,
 };
 
 let activeShot = {
-  ...SHOTS[0],
+  ...OPENING_SHOT,
   startedAt: performance.now(),
-  duration: 4200,
+  duration: 5000,
   from: { ...cam },
 };
+
+// ── パーティクルテキスト（Step 5） ─────────────────────────────────
+let activeParticle = null;
+
+function drawSpacedText(ctx, text, cx, cy, spacing) {
+  const chars = [...text];
+  const widths = chars.map((c) => ctx.measureText(c).width);
+  const total = widths.reduce((s, w) => s + w, 0) + spacing * Math.max(0, chars.length - 1);
+  let x = cx - total / 2;
+  for (let i = 0; i < chars.length; i += 1) {
+    ctx.fillText(chars[i], x + widths[i] / 2, cy);
+    x += widths[i] + spacing;
+  }
+}
+
+function spawnBgBoard(text, color) {
+  const col = color || "#39c5bb";
+  let mesh = null, geo = null, mat = null, tex = null, cv = null, ctx = null;
+  let dissolved = false;
+  let rafId = 0;
+
+  const cleanup = () => {
+    cancelAnimationFrame(rafId);
+    if (mesh) scene.remove(mesh);
+    geo?.dispose(); mat?.dispose(); tex?.dispose();
+    mesh = geo = mat = tex = cv = ctx = null;
+  };
+
+  const build = () => {
+    const H = 160;
+    const SPACING = 24;
+    const FONT_FAMILY = `"DotGothic16", sans-serif`;
+    let fontSize = 72;
+
+    const mctx = document.createElement("canvas").getContext("2d");
+    const measureW = (fs) => {
+      mctx.font = `${fs}px ${FONT_FAMILY}`;
+      const ws = [...text].map((c) => mctx.measureText(c).width);
+      return ws.reduce((s, w) => s + w, 0) + SPACING * Math.max(0, ws.length - 1);
+    };
+
+    const MAX_PLANE_W = 9.0;
+    const MAX_CANVAS_W = Math.floor((MAX_PLANE_W / 1.2) * H);
+    while (measureW(fontSize) > MAX_CANVAS_W - 80 && fontSize > 24) fontSize -= 4;
+
+    const textW = measureW(fontSize);
+    const W = Math.min(Math.ceil(textW) + 100, MAX_CANVAS_W);
+    const chars = [...text];
+
+    cv = document.createElement("canvas");
+    cv.width = W; cv.height = H;
+    ctx = cv.getContext("2d");
+
+    const redraw = (count) => {
+      ctx.clearRect(0, 0, W, H);
+      if (count === 0) { tex.needsUpdate = true; return; }
+      ctx.font = `${fontSize}px ${FONT_FAMILY}`;
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = col;
+      ctx.shadowColor = col;
+      ctx.shadowBlur = 18;
+      ctx.globalAlpha = 0.88;
+      drawSpacedText(ctx, chars.slice(0, count).join(""), W / 2, H / 2, SPACING);
+      tex.needsUpdate = true;
+    };
+
+    tex = new THREE.CanvasTexture(cv);
+    const planeW = (W / H) * 1.2;
+    geo = new THREE.PlaneGeometry(planeW, 1.2);
+    mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(0, modelCenterY + 0.15, -1.5);
+    scene.add(mesh);
+
+    // ── タイプインアニメーション ─────────────────────────────────
+    let visibleCount = 0;
+    const CHAR_MS = Math.max(40, Math.min(100, 700 / chars.length));
+    let lastCharAt = performance.now();
+
+    const typeLoop = (now) => {
+      if (!mat) return;
+      const newChars = Math.floor((now - lastCharAt) / CHAR_MS);
+      if (newChars > 0) {
+        visibleCount = Math.min(visibleCount + newChars, chars.length);
+        lastCharAt = now;
+        redraw(visibleCount);
+      }
+      if (visibleCount < chars.length) {
+        rafId = requestAnimationFrame(typeLoop);
+      }
+    };
+    rafId = requestAnimationFrame(typeLoop);
+  };
+
+  document.fonts.load(`72px "DotGothic16"`).then(() => {
+    if (!dissolved) build();
+  });
+
+  return function dissolveBoard() {
+    dissolved = true;
+    cancelAnimationFrame(rafId);
+    if (!mat) return;
+
+    // ── 左へ流れながらフェードアウト ────────────────────────────
+    const flowOut = () => {
+      if (!mat) return;
+      mesh.position.x -= 0.15;
+      mat.opacity = Math.max(0, mat.opacity - 0.022);
+      if (mat.opacity > 0) {
+        rafId = requestAnimationFrame(flowOut);
+      } else {
+        cleanup();
+      }
+    };
+    rafId = requestAnimationFrame(flowOut);
+  };
+}
 
 window.ModelStage = {
   onPhrase,
   onSection,
   reset,
+  spawnParticle(text, color) {
+    activeParticle?.dissolve?.();
+    activeParticle = { dissolve: spawnBgBoard(text, color) };
+    return function dissolve() {
+      activeParticle?.dissolve?.();
+      activeParticle = null;
+    };
+  },
 };
 
 loadModel();
@@ -281,13 +489,18 @@ function onPhrase(phrase) {
 }
 
 function reset() {
+  activeParticle?.dissolve?.();
+  activeParticle = null;
   lastPhraseIndex = 0;
   activeShot = {
-    ...SHOTS[0],
+    ...OPENING_SHOT,
     startedAt: performance.now(),
-    duration: 4200,
+    duration: 5000,
     from: { ...cam },
   };
+  previousPlaying = false;
+  outroTriggered = false;
+  lastSceneCueId = null;
   phrasePulse = 0;
   sectionId = "intro";
   targetEnergy = SECTION_VIS.intro.energy;
@@ -299,7 +512,7 @@ function reset() {
     s.active = false;
   });
   shootSpawnTimer = 0;
-  shotName.textContent = SHOTS[0].label;
+  shotName.textContent = OPENING_SHOT.label;
 }
 
 function tick(now) {
@@ -308,8 +521,51 @@ function tick(now) {
   const dt = Math.min(clock.getDelta(), 0.05);
   const playing = !!state.isPlaying;
 
-  if (state.phraseIndex && state.phraseIndex !== lastPhraseIndex) {
-    onPhrase(state.phrase || { index: state.phraseIndex, startTime: 0, endTime: 3600 });
+  // 再生終了 → アウトロカメラ（正面からゆっくり引いていく）
+  if (previousPlaying && !playing && !outroTriggered && lastPhraseIndex > 0) {
+    outroTriggered = true;
+    activeShot = {
+      ...OUTRO_SHOT,
+      startedAt: performance.now(),
+      duration: 8000,
+      from: { ...cam },
+    };
+    shotName.textContent = OUTRO_SHOT.label;
+  }
+  previousPlaying = playing;
+
+  // シーン別カメラキュー (S1-S10): 時間ベースで activeShot を決定
+  {
+    const posMs = state.position || 0;
+    const cue = playing && posMs > 0
+      ? SCENE_CUES.find(c => posMs >= c.startMs && posMs < c.endMs) ?? null
+      : null;
+    const cueId = cue ? cue.id : null;
+    if (cueId !== lastSceneCueId) {
+      lastSceneCueId = cueId;
+      if (cue) {
+        activeShot = {
+          label: cue.label,
+          az: cue.az, orbit: cue.orbit,
+          el0: cue.el0, el1: cue.el1,
+          radius0: cue.radius0, radius1: cue.radius1,
+          y: cue.y, fov: cue.fov,
+          startedAt: performance.now(),
+          duration: cue.dur,
+          from: { ...cam },
+        };
+        shotName.textContent = cue.label;
+      }
+    }
+
+    // フレーズ切り替え: シーンキュー有効中は抑制（インデックスだけ同期してずれを防ぐ）
+    if (state.phraseIndex && state.phraseIndex !== lastPhraseIndex) {
+      if (!cue) {
+        onPhrase(state.phrase || { index: state.phraseIndex, startTime: 0, endTime: 3600 });
+      } else {
+        lastPhraseIndex = state.phraseIndex;
+      }
+    }
   }
 
   if (mixer) {
@@ -324,6 +580,8 @@ function tick(now) {
   beatPulse = Math.max(0, beatPulse - dt * 4.2);
   phrasePulse = Math.max(0, phrasePulse - dt * 1.7);
   ringPulse = Math.max(0, ringPulse - dt * 1.4);
+
+  // activeParticle は CSS ベースに変更したため tick 不要
 
   updateMorphs(dt);
   updateCamera(now, dt);
@@ -764,7 +1022,7 @@ function updateShootingStars(dt) {
     if (shootSpawnTimer <= 0) {
       const free = shootState.find((s) => !s.active);
       if (free) spawnShootingStar(free);
-      shootSpawnTimer = 0.35 + Math.random() * 0.55;
+      shootSpawnTimer = 0.12 + Math.random() * 0.22;
     }
   }
 
