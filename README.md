@@ -14,8 +14,8 @@ TextAlive App API と Three.js を用いた、ライブ会場風の 3D 文字PV 
 ローカルで確認する場合は、リポジトリ直下で任意の静的 HTTP サーバを起動してください。
 
 ```bash
-# 例 1: Python
-python3 -m http.server 8000
+# 例 1: PHP
+php -S localhost:8080
 
 # 例 2: Node.js (npx)
 npx serve .
