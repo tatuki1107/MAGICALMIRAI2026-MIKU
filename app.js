@@ -47,6 +47,14 @@
     media: $("#media"),
   };
 
+  const startScreen = document.getElementById("start-screen");
+  const startCta = document.getElementById("startCta");
+  const blackout = document.getElementById("blackout");
+  const replayScreen = document.getElementById("replay-screen");
+  const replayBtn = document.getElementById("replayBtn");
+  let replayTimer = null;
+  let blackoutTimer = null;
+
   const state = window.MusicBG || (window.MusicBG = {});
   state.beatProgress = 0;
   state.beatIndex = -1;
@@ -71,6 +79,9 @@
   let lastWordStartTime = -1;
   let lastCharStartTime = -1;
   let lastPlayRequestAt = -Infinity;
+  let pendingPlay = false;
+  let playbackActive = false;
+  let reachedEnd = false;
   let choruses = [];
   let firstPhraseTime = -1;
   let committedSectionId = "intro";
@@ -78,6 +89,9 @@
   let pendingSectionSince = 0;
 
   bindControls();
+  bindStartScreen();
+  bindReplay();
+  initStartStars();
 
   function createPlayer() {
     const nextPlayer = new Player({
@@ -103,6 +117,79 @@
     });
 
     return nextPlayer;
+  }
+
+  function bindStartScreen() {
+    if (!startScreen) return;
+
+    const activate = () => {
+      unlockMediaElement();
+      if (player.video) {
+        player.requestPlay();
+        dismissStartScreen();
+      } else {
+        pendingPlay = true;
+        if (startCta) {
+          startCta.textContent = "LOADING...";
+          startCta.classList.add("is-loading");
+        }
+      }
+    };
+
+    startScreen.addEventListener("click", activate);
+    startScreen.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") activate();
+    });
+  }
+
+  function bindReplay() {
+    if (!replayBtn || !replayScreen) return;
+    replayBtn.addEventListener("click", () => {
+      clearTimeout(blackoutTimer);
+      clearTimeout(replayTimer);
+      replayScreen.hidden = true;
+      if (blackout) blackout.hidden = true;
+      player.requestMediaSeek(0);
+      window.setTimeout(() => {
+        unlockMediaElement();
+        player.requestPlay();
+      }, 80);
+    });
+  }
+
+  function initStartStars() {
+    const canvas = document.getElementById("start-stars");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const W = (canvas.width = window.innerWidth);
+    const H = (canvas.height = window.innerHeight);
+
+    for (let i = 0; i < 220; i++) {
+      const x = Math.random() * W;
+      const y = Math.random() * H;
+      const r = Math.random() * 1.3 + 0.2;
+      const opacity = Math.random() * 0.65 + 0.3;
+      const cyan = Math.random() < 0.28;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = cyan
+        ? `rgba(57,197,187,${opacity})`
+        : `rgba(255,255,255,${opacity})`;
+      ctx.fill();
+    }
+
+    // 中央に向かう淡いグロー
+    const glow = ctx.createRadialGradient(W / 2, H * 0.52, 0, W / 2, H * 0.52, W * 0.44);
+    glow.addColorStop(0, "rgba(57,197,187,0.10)");
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function dismissStartScreen() {
+    if (!startScreen) return;
+    startScreen.classList.add("is-dismissed");
+    window.setTimeout(() => { startScreen.hidden = true; }, 750);
   }
 
   function bindControls() {
@@ -264,12 +351,23 @@
     disableTransport(false);
     setStatus("Playback ready", "ready");
     addEvent("timer ready");
+    if (pendingPlay) {
+      pendingPlay = false;
+      player.requestPlay();
+      dismissStartScreen();
+    }
   }
 
   function onPlay() {
+    playbackActive = true;
+    reachedEnd = false;
     state.isPlaying = true;
     setStatus("Playing", "ready");
     addEvent("play");
+    clearTimeout(blackoutTimer);
+    clearTimeout(replayTimer);
+    if (blackout) blackout.hidden = true;
+    if (replayScreen) replayScreen.hidden = true;
   }
 
   function onPause() {
@@ -279,16 +377,45 @@
   }
 
   function onStop() {
+    const nearEnd = duration > 0 && state.position >= duration * 0.88;
+    const shouldShowReplay = playbackActive && (reachedEnd || nearEnd);
+    playbackActive = false;
+    reachedEnd = false;
     state.isPlaying = false;
     setStatus("Stopped", "ready");
     addEvent("stop");
     window.Lyrics3D?.onEnd?.();
     updatePosition(0);
     resetLiveState();
+
+    clearTimeout(blackoutTimer);
+    clearTimeout(replayTimer);
+    if (shouldShowReplay) {
+      // 2秒後に暗転開始（3秒かけてフェードイン）
+      blackoutTimer = window.setTimeout(() => {
+        if (!blackout) return;
+        blackout.style.animation = "none";
+        void blackout.offsetWidth;
+        blackout.style.animation = "";
+        blackout.hidden = false;
+      }, 2000);
+      // 5秒後にリプレイ画面（暗転完了後）
+      replayTimer = window.setTimeout(() => {
+        if (!replayScreen) return;
+        // アニメーションを毎回リセットして再生
+        replayScreen.style.animation = "none";
+        void replayScreen.offsetWidth;
+        replayScreen.style.animation = "";
+        replayScreen.hidden = false;
+      }, 5000);
+    }
   }
 
   function onTimeUpdate(position) {
     state.position = position;
+    if (duration > 0 && position >= duration - 2000) {
+      reachedEnd = true;
+    }
     updatePosition(position);
     updateBeat(position);
     updateHarmony(position);

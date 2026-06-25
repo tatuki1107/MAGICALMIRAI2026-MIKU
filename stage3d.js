@@ -65,6 +65,7 @@ let beatPulse = 0;
 let previousBeat = -1;
 let lastPhraseIndex = 0;
 let previousPlaying = false;
+let introTriggered = false;
 let outroTriggered = false;
 let lastSceneCueId = null;
 
@@ -170,6 +171,7 @@ scene.add(shooting.points);
 scene.add(shooting.lines);
 
 const OPENING_SHOT = { label: "Opening / Front", az: 0, orbit: 0, el0: 8, el1: 10, radius0: 5.8, radius1: 5.6, y: 1.22, fov: 40 };
+const INTRO_SHOT   = { label: "Intro / Fly in",   az: 180, orbit: -180, el0: 32, el1: 10, radius0: 80.0, radius1: 5.8, y: 1.22, fov: 42 };
 const OUTRO_SHOT   = { label: "Outro / Pull back", az: 0, orbit: 120, el0: 10, el1: 32, radius0: 5.8, radius1: 48.0, y: 1.22, fov: 58 };
 
 const SHOTS = [
@@ -214,9 +216,9 @@ const SCENE_CUES = [
     label: "S4 High angle",
     az: 150, orbit:  60, el0: 38, el1: 50, radius0: 6.0, radius1: 5.2, y: 1.18, fov: 46, dur: 1800 },
   // S5: 調律されてる鼓動？→ 急接近（覚醒の境界線）
-  { id: "S5",  startMs: 12450, endMs: 13400,
-    label: "S5 Zoom in",
-    az:   8, orbit:  12, el0: 14, el1: 18, radius0: 1.7, radius1: 1.5, y: 1.62, fov: 20, dur: 600 },
+  // { id: "S5",  startMs: 12450, endMs: 13400,
+  //   label: "S5 Zoom in",
+  //   az:   8, orbit:  12, el0: 14, el1: 18, radius0: 1.7, radius1: 1.5, y: 1.62, fov: 20, dur: 600 },
   // S6: くだらない言葉吹き飛ばす → 横移動・躍動感
   { id: "S6",  startMs: 13400, endMs: 15200,
     label: "S6 Side slide",
@@ -476,6 +478,7 @@ function reset() {
     from: { ...cam },
   };
   previousPlaying = false;
+  introTriggered = false;
   outroTriggered = false;
   lastSceneCueId = null;
   phrasePulse = 0;
@@ -497,6 +500,24 @@ function tick(now) {
 
   const dt = Math.min(clock.getDelta(), 0.05);
   const playing = !!state.isPlaying;
+
+  // 再生開始 → イントロカメラ（遠くからステージへ飛び込む）
+  if (!previousPlaying && playing && !introTriggered) {
+    introTriggered = true;
+    cam.radius = INTRO_SHOT.radius0;
+    cam.el     = INTRO_SHOT.el0;
+    cam.az     = INTRO_SHOT.az;
+    cam.y      = INTRO_SHOT.y;
+    cam.x      = 0;
+    cam.fov    = INTRO_SHOT.fov;
+    activeShot = {
+      ...INTRO_SHOT,
+      startedAt: performance.now(),
+      duration: 5000,
+      from: { ...cam },
+    };
+    shotName.textContent = INTRO_SHOT.label;
+  }
 
   // 再生終了 → アウトロカメラ（正面からゆっくり引いていく）
   if (previousPlaying && !playing && !outroTriggered && lastPhraseIndex > 0) {
