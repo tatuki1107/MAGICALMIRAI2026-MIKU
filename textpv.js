@@ -189,19 +189,24 @@
     let phase = "in";
     let rafId = 0;
 
+    let alpha = 1;
+
     const tick = () => {
       ctx.clearRect(0, 0, W, H);
+      ctx.globalAlpha = alpha;
       ctx.fillStyle = color;
       for (const d of dots) {
-        const tx = phase === "out" ? d.tx + (Math.random() - 0.5) * W * 2 : d.tx;
-        const ty = phase === "out" ? d.ty + (Math.random() - 0.5) * H * 2 : d.ty;
-        d.vx = (d.vx + (tx - d.x) * SPRING) * DAMPING;
-        d.vy = (d.vy + (ty - d.y) * SPRING) * DAMPING;
+        d.vx = (d.vx + (d.tx - d.x) * SPRING) * DAMPING;
+        d.vy = (d.vy + (d.ty - d.y) * SPRING) * DAMPING;
         d.x += d.vx;
         d.y += d.vy;
         ctx.beginPath();
         ctx.arc(d.x, d.y, 1.8, 0, Math.PI * 2);
         ctx.fill();
+      }
+      if (phase === "out") {
+        alpha = Math.max(0, alpha - 0.04);
+        if (alpha <= 0) { cancelAnimationFrame(rafId); canvas.remove(); return; }
       }
       rafId = requestAnimationFrame(tick);
     };
@@ -209,10 +214,6 @@
 
     return function dissolve() {
       phase = "out";
-      schedule(() => {
-        cancelAnimationFrame(rafId);
-        canvas.remove();
-      }, 800);
     };
   }
 
