@@ -91,29 +91,6 @@ let motifIntensity = 0; // 信号モチーフ強度 0..1
 let targetMotif = 0.2;
 let ringPulse = 0;
 
-// 表情モーフ (D-3) — モデルに morphTarget があれば歌唱に同期
-let morphMesh = null;
-const morph = { mouth: -1, blink: -1, smile: -1 };
-let mouthValue = 0;
-let blinkValue = 0;
-let blinkTimer = 1.5;
-
-// セクション演出 (D-4/D-5) — app.js の section に追従
-const SECTION_VIS = {
-  intro: { energy: 0.1, motif: 0.2 },
-  amelo: { energy: 0.3, motif: 0.25 },
-  bmelo: { energy: 0.5, motif: 0.6 },
-  chorus: { energy: 1.0, motif: 0.8 },
-  interlude: { energy: 0.45, motif: 1.0 },
-  finale: { energy: 1.0, motif: 1.0 },
-};
-let sectionId = "intro";
-let sectionEnergy = 0; // 0=静 .. 1=最高潮
-let targetEnergy = 0.1;
-let motifIntensity = 0; // 信号モチーフ強度 0..1
-let targetMotif = 0.2;
-let ringPulse = 0;
-
 const clock = new THREE.Clock();
 const colorA = new THREE.Color(0x39c5bb);
 const colorB = new THREE.Color(0xff5ca8);
