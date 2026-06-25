@@ -412,8 +412,6 @@
       progress: clamp01(unit.progress(now)),
     };
 
-    console.log(`[phrase] ${(unit.startTime/1000).toFixed(1)}s - ${(unit.endTime/1000).toFixed(1)}s\t${unit.text}`);
-    let w = unit.firstWord; while (w) { console.log(`  [word] ${(w.startTime/1000).toFixed(2)}s - ${(w.endTime/1000).toFixed(2)}s\t"${w.text}"`); w = w.next; }
     window.ModelStage?.onPhrase?.(state.phrase, now);
     window.Lyrics3D?.onPhrase?.(unit, now);
     window.TextPV?.onPhrase?.(
