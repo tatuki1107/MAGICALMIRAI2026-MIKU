@@ -66,7 +66,7 @@ input {
 
 .typography-layer {
   position: absolute;
-  inset: 72px 0 82px;
+  inset: 72px 0 12px;
   z-index: 7;
   overflow: visible;
   pointer-events: none;
@@ -246,6 +246,7 @@ input {
   right: 7%;
   top: 5%;
   transform: translateY(-14px);
+  translate: calc(var(--pv-ox, 0) * -1) var(--pv-oy, 0);
 }
 
 .pv-vertical .pv-mask {
@@ -295,10 +296,11 @@ input {
 }
 
 .pv-slash {
-  right: 4%;
+  right: 6%;
   top: 46%;
-  max-width: min(52rem, 88vw);
+  max-width: min(52rem, 86vw);
   transform: translateY(-50%) rotate(var(--pv-angle, -8deg));
+  translate: calc(var(--pv-ox, 0) * -1) var(--pv-oy, 0);
 }
 
 .pv-slash .pv-mask::before {
@@ -698,34 +700,12 @@ input {
   font-weight: 500;
 }
 
-.status-pill,
 .shot-panel {
   border: 1px solid var(--panel-line);
   background: var(--panel);
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-}
-
-.status-pill {
-  max-width: min(46vw, 360px);
-  padding: 0.46rem 0.82rem;
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 0.82rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.status-pill.ready {
-  border-color: rgba(57, 197, 187, 0.62);
-  color: var(--accent);
-}
-
-.status-pill.error {
-  border-color: rgba(255, 92, 120, 0.7);
-  color: #ff768c;
 }
 
 .shot-panel {
@@ -754,25 +734,6 @@ input {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-
-.beat-meter {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 78px;
-  z-index: 9;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.beat-meter div {
-  width: 0%;
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--accent-warm), var(--accent-hot));
-  box-shadow: 0 0 18px rgba(57, 197, 187, 0.62);
-  transition: width 60ms linear;
 }
 
 .controls-overlay {
@@ -1032,7 +993,7 @@ button:disabled {
 
 @media (max-width: 720px) {
   .typography-layer {
-    inset: 82px 0 98px;
+    inset: 82px 0 12px;
   }
 
   .pv-slide,
@@ -1075,10 +1036,6 @@ button:disabled {
     padding-top: 14px;
   }
 
-  .status-pill {
-    max-width: 42vw;
-  }
-
   .shot-panel {
     top: 76px;
     right: 16px;
@@ -1098,7 +1055,7 @@ button:disabled {
 
 @media (max-width: 440px) {
   .typography-layer {
-    inset: 90px 0 104px;
+    inset: 90px 0 12px;
   }
 
   .pv-text {
@@ -1134,7 +1091,7 @@ button:disabled {
 
 @media (max-height: 560px) {
   .typography-layer {
-    inset: 58px 0 82px;
+    inset: 58px 0 12px;
   }
 }
 

@@ -24,7 +24,6 @@
 
   const $ = (selector) => document.querySelector(selector);
   const elements = {
-    status: $("#status"),
     songTitle: $("#songTitle"),
     artistName: $("#artistName"),
     position: $("#position"),
@@ -35,7 +34,6 @@
     phraseCount: $("#phraseCount"),
     wordCount: $("#wordCount"),
     charCount: $("#charCount"),
-    beatBar: $("#beatBar"),
     events: $("#events"),
     controlPanel: $("#controlPanel"),
     play: $("#play"),
@@ -618,7 +616,6 @@
       state.beatIndex = -1;
       state.beatProgress = 0;
       elements.beat.textContent = "-";
-      elements.beatBar.style.width = "0%";
       document.documentElement.style.setProperty("--beat-progress", "0");
       return;
     }
@@ -628,7 +625,6 @@
     state.beatIndex = beat.index;
     state.beatProgress = progress;
     elements.beat.textContent = `#${beat.index} ${Math.round(progress * 100)}%`;
-    elements.beatBar.style.width = `${Math.ceil(easedProgress * 100)}%`;
     document.documentElement.style.setProperty("--beat-progress", progress.toFixed(3));
   }
 
@@ -654,7 +650,6 @@
     elements.seek.value = "0";
     elements.seek.max = "0";
     elements.duration.textContent = "0:00.000";
-    elements.beatBar.style.width = "0%";
     document.documentElement.style.setProperty("--beat-progress", "0");
     document.documentElement.style.setProperty("--phrase-progress", "0");
     resetLiveState();
@@ -689,11 +684,7 @@
     elements.jump.disabled = disabled || !(player.video && player.video.firstPhrase);
   }
 
-  function setStatus(message, variant) {
-    elements.status.textContent = message;
-    elements.status.classList.toggle("ready", variant === "ready");
-    elements.status.classList.toggle("error", variant === "error");
-  }
+  function setStatus(_message, _variant) {}
 
   function addEvent(message) {
     if (!elements.events) return;
