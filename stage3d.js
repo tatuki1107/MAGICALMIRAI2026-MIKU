@@ -172,18 +172,18 @@ scene.add(shooting.lines);
 
 const OPENING_SHOT = { label: "Opening / Front", az: 0, orbit: 0, el0: 8, el1: 10, radius0: 5.8, radius1: 5.6, y: 1.22, fov: 40 };
 const INTRO_SHOT   = { label: "Intro / Fly in",   az: 180, orbit: -180, el0: 32, el1: 10, radius0: 80.0, radius1: 5.8, y: 1.22, fov: 42 };
-const OUTRO_SHOT   = { label: "Outro / Pull back", az: 0, orbit: 120, el0: 10, el1: 32, radius0: 5.8, radius1: 48.0, y: 1.22, fov: 58 };
+const OUTRO_SHOT   = { label: "Outro / Pull back", az: 0, orbit: 0, el0: 10, el1: 32, radius0: 5.8, radius1: 48.0, y: 1.22, fov: 58 };
 
 const SHOTS = [
   { label: "Shot 01 / Front rise", az: -18, orbit: 54, el0: 7, el1: 15, radius0: 7.0, radius1: 6.0, y: 1.18, fov: 42 },
   { label: "Shot 02 / Close face arc", az: 28, orbit: -32, el0: 12, el1: 18, radius0: 3.45, radius1: 3.0, y: 1.48, fov: 31 },
   { label: "Shot 03 / Left runway", az: -82, orbit: 48, el0: 4, el1: 9, radius0: 5.4, radius1: 4.9, y: 1.12, x: -0.18, fov: 38 },
-  { label: "Shot 04 / High sweep", az: 142, orbit: 76, el0: 34, el1: 48, radius0: 7.2, radius1: 6.2, y: 1.18, fov: 48 },
-  { label: "Shot 05 / Low chase", az: 212, orbit: -64, el0: -7, el1: 3, radius0: 5.8, radius1: 4.6, y: 0.9, fov: 46 },
-  { label: "Shot 06 / Back halo", az: 176, orbit: 42, el0: 10, el1: 22, radius0: 4.8, radius1: 4.2, y: 1.28, fov: 36 },
-  { label: "Shot 07 / Wide orbit", az: 250, orbit: 112, el0: 7, el1: 12, radius0: 8.0, radius1: 6.8, y: 1.12, fov: 50 },
+  { label: "Shot 04 / High angle", az: 30, orbit: 50, el0: 34, el1: 48, radius0: 7.2, radius1: 6.2, y: 1.18, fov: 48 },
+  { label: "Shot 05 / Low chase", az: -20, orbit: -40, el0: -7, el1: 3, radius0: 5.8, radius1: 4.6, y: 0.9, fov: 46 },
+  { label: "Shot 06 / Side arc", az: -70, orbit: 45, el0: 10, el1: 22, radius0: 4.8, radius1: 4.2, y: 1.28, fov: 36 },
+  { label: "Shot 07 / Wide orbit", az: 45, orbit: -90, el0: 7, el1: 12, radius0: 8.0, radius1: 6.8, y: 1.12, fov: 50 },
   { label: "Shot 08 / Side close", az: 84, orbit: -44, el0: 8, el1: 15, radius0: 3.8, radius1: 3.3, y: 1.36, x: 0.18, fov: 33 },
-  { label: "Shot 09 / Spiral drop", az: -132, orbit: 94, el0: 42, el1: 8, radius0: 6.5, radius1: 5.0, y: 1.15, fov: 42 },
+  { label: "Shot 09 / Spiral drop", az: -45, orbit: 90, el0: 42, el1: 8, radius0: 6.5, radius1: 5.0, y: 1.15, fov: 42 },
   { label: "Shot 10 / Long chase", az: 322, orbit: 68, el0: 3, el1: 10, radius0: 9.0, radius1: 7.2, y: 1.05, x: -0.28, fov: 52 },
 ];
 
@@ -211,10 +211,10 @@ const SCENE_CUES = [
   { id: "S3a", startMs:  8840, endMs:  9200,
     label: "S3a Arrow snap",
     az:   0, orbit:   0, el0:  8, el1:  8, radius0: 2.6, radius1: 2.6, y: 1.35, fov: 30, dur: 400 },
-  // S4: 光と影飲み込む → 俯瞰気味アングル
+  // S4: 光と影飲み込む → 俯瞰気味アングル（正面より）
   { id: "S4",  startMs:  9200, endMs: 12450,
     label: "S4 High angle",
-    az: 150, orbit:  60, el0: 38, el1: 50, radius0: 6.0, radius1: 5.2, y: 1.18, fov: 46, dur: 1800 },
+    az: 25, orbit:  50, el0: 38, el1: 50, radius0: 6.0, radius1: 5.2, y: 1.18, fov: 46, dur: 1800 },
   // S5: 調律されてる鼓動？→ 急接近（覚醒の境界線）
   // { id: "S5",  startMs: 12450, endMs: 13400,
   //   label: "S5 Zoom in",
@@ -227,14 +227,14 @@ const SCENE_CUES = [
   { id: "S7",  startMs: 15200, endMs: 17400,
     label: "S7 低アングル煽り",
     az:  10, orbit: -20, el0: -12, el1: -6, radius0: 3.2, radius1: 2.8, y: 0.5, fov: 44, dur: 1000 },
-  // S8: さあアップ＆ダウン → ダイナミック広角
+  // S8: さあアップ＆ダウン → ダイナミック広角（左サイドから正面へ）
   { id: "S8",  startMs: 17400, endMs: 20200,
     label: "S8 Dynamic wide",
-    az: -120, orbit: 100, el0:  5, el1: 14, radius0: 6.5, radius1: 5.5, y: 1.10, fov: 50, dur: 1500 },
-  // S9: このリアル掌返して → 180°ターン
+    az: -60, orbit: 60, el0:  5, el1: 14, radius0: 6.5, radius1: 5.5, y: 1.10, fov: 50, dur: 1500 },
+  // S9: このリアル掌返して → 左サイドから正面へスイング
   { id: "S9",  startMs: 20200, endMs: 22500,
-    label: "S9 180ターン",
-    az: 175, orbit: 185, el0:  8, el1: 12, radius0: 3.8, radius1: 3.5, y: 1.20, fov: 38, dur: 800 },
+    label: "S9 サイドスイング",
+    az: -80, orbit: 80, el0:  8, el1: 12, radius0: 3.8, radius1: 3.5, y: 1.20, fov: 38, dur: 800 },
   // S10: 皆テイクオーバー → 初フルショット（最大引き）
   { id: "S10", startMs: 22500, endMs: 24000,
     label: "S10 First full shot",
@@ -697,6 +697,24 @@ function onSection(section) {
     phrasePulse = 1;
     ringPulse = 1;
     shotName.textContent = impact.label;
+  }
+
+  // 間奏: Shot10スタイルの広角でゆっくり180°
+  if (sectionId === "interlude") {
+    const interludeOrbit = {
+      label: "Interlude / Slow orbit",
+      az: cam.az, orbit: 180,
+      el0: 5, el1: 10,
+      radius0: 9.0, radius1: 8.5,
+      y: 1.05, x: -0.28, fov: 52,
+    };
+    activeShot = {
+      ...interludeOrbit,
+      startedAt: performance.now(),
+      duration: 22000,
+      from: { ...cam },
+    };
+    shotName.textContent = interludeOrbit.label;
   }
 }
 

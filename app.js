@@ -80,6 +80,7 @@
   let pendingPlay = false;
   let playbackActive = false;
   let reachedEnd = false;
+  let endSequenceActive = false;
   let choruses = [];
   let firstPhraseTime = -1;
   let committedSectionId = "intro";
@@ -90,6 +91,7 @@
   bindStartScreen();
   bindReplay();
   initStartStars();
+  initReplayStars();
 
   function createPlayer() {
     const nextPlayer = new Player({
@@ -155,13 +157,11 @@
     });
   }
 
-  function initStartStars() {
-    const canvas = document.getElementById("start-stars");
+  function drawStarsToCanvas(canvas) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const W = (canvas.width = window.innerWidth);
     const H = (canvas.height = window.innerHeight);
-
     for (let i = 0; i < 220; i++) {
       const x = Math.random() * W;
       const y = Math.random() * H;
@@ -170,18 +170,22 @@
       const cyan = Math.random() < 0.28;
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.fillStyle = cyan
-        ? `rgba(57,197,187,${opacity})`
-        : `rgba(255,255,255,${opacity})`;
+      ctx.fillStyle = cyan ? `rgba(57,197,187,${opacity})` : `rgba(255,255,255,${opacity})`;
       ctx.fill();
     }
-
-    // 中央に向かう淡いグロー
     const glow = ctx.createRadialGradient(W / 2, H * 0.52, 0, W / 2, H * 0.52, W * 0.44);
     glow.addColorStop(0, "rgba(57,197,187,0.10)");
     glow.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, W, H);
+  }
+
+  function initStartStars() {
+    drawStarsToCanvas(document.getElementById("start-stars"));
+  }
+
+  function initReplayStars() {
+    drawStarsToCanvas(document.getElementById("replay-stars"));
   }
 
   function dismissStartScreen() {
@@ -359,6 +363,7 @@
   function onPlay() {
     playbackActive = true;
     reachedEnd = false;
+    endSequenceActive = false;
     state.isPlaying = true;
     setStatus("Playing", "ready");
     addEvent("play");
@@ -369,9 +374,31 @@
   }
 
   function onPause() {
+    const shouldShowReplay = playbackActive && reachedEnd;
     state.isPlaying = false;
     setStatus("Paused", "ready");
     addEvent("pause");
+    // TextAlive は曲の自然終了時に onStop ではなく onPause を呼ぶ場合がある
+    if (shouldShowReplay) {
+      endSequenceActive = true;
+      clearTimeout(blackoutTimer);
+      clearTimeout(replayTimer);
+      // アウトロカメラ(8秒)の完了に合わせたタイミング
+      blackoutTimer = window.setTimeout(() => {
+        if (!blackout) return;
+        blackout.style.animation = "none";
+        void blackout.offsetWidth;
+        blackout.style.animation = "";
+        blackout.hidden = false;
+      }, 6000);
+      replayTimer = window.setTimeout(() => {
+        if (!replayScreen) return;
+        replayScreen.style.animation = "none";
+        void replayScreen.offsetWidth;
+        replayScreen.style.animation = "";
+        replayScreen.hidden = false;
+      }, 9000);
+    }
   }
 
   function onStop() {
@@ -386,26 +413,29 @@
     updatePosition(0);
     resetLiveState();
 
-    clearTimeout(blackoutTimer);
-    clearTimeout(replayTimer);
-    if (shouldShowReplay) {
-      // 2秒後に暗転開始（3秒かけてフェードイン）
+    // onPause でリプレイシーケンス開始済みの場合はタイマーを維持する
+    const wasEndSequenceActive = endSequenceActive;
+    endSequenceActive = false;
+    if (!wasEndSequenceActive) {
+      clearTimeout(blackoutTimer);
+      clearTimeout(replayTimer);
+    }
+    if (shouldShowReplay && !wasEndSequenceActive) {
+      // アウトロカメラ(8秒)の完了に合わせたタイミング
       blackoutTimer = window.setTimeout(() => {
         if (!blackout) return;
         blackout.style.animation = "none";
         void blackout.offsetWidth;
         blackout.style.animation = "";
         blackout.hidden = false;
-      }, 2000);
-      // 5秒後にリプレイ画面（暗転完了後）
+      }, 6000);
       replayTimer = window.setTimeout(() => {
         if (!replayScreen) return;
-        // アニメーションを毎回リセットして再生
         replayScreen.style.animation = "none";
         void replayScreen.offsetWidth;
         replayScreen.style.animation = "";
         replayScreen.hidden = false;
-      }, 5000);
+      }, 9000);
     }
   }
 
