@@ -38,6 +38,8 @@ npx serve .
 | `index.html` | エントリーポイント。CDN 依存の読み込みと画面レイアウト |
 | `style.css` | ライブ会場風 UI のスタイル |
 | `app.js` | TextAlive App API の制御。再生・歌詞イベント・拍/サビ/声量情報を `window.MusicBG` へ配信 |
+| `stage3d.js` | 3D メインステージ。GLB モデル・カメラ演出・ブルーム・フロア・流れ星を管理し `window.ModelStage` を公開 |
+| `textpv.js` | 歌詞テキスト PV エンジン。フレーズ・単語・文字をセクションごとの variant/tone で演出し `window.TextPV` を公開 |
 | `bg.js` | 背景シーン (光の筋・星・波紋・ブルーム/残像ポストエフェクト) |
 | `lyrics3d.js` | 3D 歌詞演出エンジン (曲のセクションに応じた出現パターン切り替え) |
 | `dancer.js` | ダンサー。歌詞の単語・フレーズ進行・声量に同期して踊る |

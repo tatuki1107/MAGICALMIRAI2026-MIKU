@@ -1,6 +1,14 @@
+/**
+ * dancer.js — ダンサーモジュール
+ * GLB モデルを読み込み、フレーズ・拍・声量に同期してダンスアニメーションを制御する。
+ * GLB が存在しない場合はプロシージャルな人型フィギュアにフォールバックする。
+ * カメラはビート数ベースの cut / sweep シーケンスで自動切り替えする。
+ */
+
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+// ── レンダラー / シーン / カメラ / ライト ──────────────────────
 const canvas = document.getElementById('dancer-canvas');
 if (!canvas) throw new Error('dancer-canvas missing');
 
@@ -41,7 +49,7 @@ function onResize() {
 onResize();
 new ResizeObserver(onResize).observe(canvas.parentElement || canvas);
 
-// ── Procedural humanoid ──────────────────────────────────────
+// ── プロシージャル人型フィギュア (GLB 読み込み失敗時のフォールバック) ──
 function buildFigure() {
   const g = new THREE.Group();
   const mat = new THREE.MeshPhongMaterial({
@@ -110,8 +118,7 @@ function buildFigure() {
   const ll = leg(1), rl = leg(-1);
 
   g._rig = { root, hips, spine, neck, head: headM, la, ra, ll, rl };
-  g._mats = scene.children.flatMap ? [] : [];
-  // collect all materials for color updates
+  g._mats = [];
   g.traverse(o => { if (o.isMesh) g._mats.push(o.material); });
 
   return g;
@@ -123,7 +130,7 @@ const C_CHORUS = new THREE.Color(0xff70cc);
 const tmpCol = new THREE.Color();
 const tmpEm  = new THREE.Color();
 
-// ── Keypose interpolation system ─────────────────────────────
+// ── キーポーズ補間システム ────────────────────────────────────
 const easeOutCubic   = t => 1 - (1 - t) ** 3;
 const easeInOutCubic = t => t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 
@@ -268,14 +275,13 @@ function tickProcedural(fig, t, beat, cho, L) {
   fig.scale.setScalar(1 + beat * 0.04);
 }
 
-// ── GLTF loading ─────────────────────────────────────────────
+// ── GLB 読み込み ──────────────────────────────────────────────
 let figure = null;
 let mixer  = null;
 let isProcedural = false;
 
 new GLTFLoader().load(
   './model.glb',
-  // './3D/test-animationn.glb',
   (gltf) => {
     figure = gltf.scene;
     const box3 = new THREE.Box3().setFromObject(figure);
@@ -299,7 +305,7 @@ new GLTFLoader().load(
   },
 );
 
-// ── Render loop ───────────────────────────────────────────────
+// ── メインループ ──────────────────────────────────────────────
 let prevBeat = -1, beatPulse = 0, choAmt = 0;
 // 歌詞同期の状態
 let prevWordStart = -1, wordPulse = 0, armSide = 1;
@@ -307,7 +313,7 @@ let prevCharStart = -1, charPulse = 0;
 let phraseAmt = 0, vocalAmt = 0;
 const clock = new THREE.Clock();
 
-// ── Camera cue system ─────────────────────────────────────────
+// ── カメラキューシステム ──────────────────────────────────────
 // az/el/r/lx/ly/fov: 球座標ショットパラメータ
 //   type: "cut" = 瞬間切り替え | "sweep" = イージング移動
 //   sweepDur: 移行時間(秒), drift: 移動中の方位角ドリフト速度(deg/s)

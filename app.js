@@ -1,6 +1,12 @@
+/**
+ * app.js — TextAlive App API コントローラー
+ * TextAlive Player を初期化し、再生・歌詞・拍・サビ・声量イベントを
+ * window.MusicBG 経由で他モジュール (stage3d.js / 歌詞 PV エンジン 等) へ配信する。
+ */
 (() => {
   "use strict";
 
+  // ── 定数 / 設定 ───────────────────────────────────────────
   const APP_TOKEN = "473zGS4UYYBAd2OR";
   const DEFAULT_SONG_URL = "https://piapro.jp/t/E2i3/20251215092113";
   const REQUIRES_HTTP = window.location.protocol === "file:";
@@ -22,6 +28,7 @@
   const SECTION_DEBOUNCE_MS = 350; // 短い歌の切れ目で section がチラつくのを防ぐ
   const INTERLUDE_DEBOUNCE_MS = 1800; // フレーズ間の短い無音を間奏と誤判定しない猶予
 
+  // ── DOM 参照 ──────────────────────────────────────────────
   const $ = (selector) => document.querySelector(selector);
   const elements = {
     songTitle: $("#songTitle"),
@@ -53,6 +60,8 @@
   let replayTimer = null;
   let blackoutTimer = null;
 
+  // ── 共有状態バス (window.MusicBG) ────────────────────────────
+  // 他モジュールはこのオブジェクトを読み取って再生状態・歌詞情報を取得する
   const state = window.MusicBG || (window.MusicBG = {});
   state.beatProgress = 0;
   state.beatIndex = -1;
@@ -69,6 +78,7 @@
   }
 
   const { Player, Ease } = window.TextAliveApp;
+  // ── TextAlive Player と内部状態 ──────────────────────────────
   let player = createPlayer();
   let duration = 0;
   let maxVocalAmplitude = 0;
@@ -87,12 +97,14 @@
   let pendingSectionId = "intro";
   let pendingSectionSince = 0;
 
+  // ── 初期化 ────────────────────────────────────────────────
   bindControls();
   bindStartScreen();
   bindReplay();
   initStartStars();
   initReplayStars();
 
+  // ── Player / スタート・リプレイ画面 ──────────────────────────
   function createPlayer() {
     const nextPlayer = new Player({
       app: {
@@ -276,6 +288,7 @@
     }
   }
 
+  // ── TextAlive イベントハンドラ ────────────────────────────────
   function onAppReady(app) {
     const mode = app.managed ? "Connected to TextAlive host" : "Standalone mode";
     setStatus(mode, "ready");
@@ -339,10 +352,6 @@
     const song = player.data && player.data.song;
     elements.songTitle.textContent = song && song.name ? song.name : "TAKEOVER";
     elements.artistName.textContent = song && song.artist && song.artist.name ? song.artist.name : "Twinfield";
-
-    if (!video.firstPhrase) {
-      // phrase panel removed
-    }
 
     disableTransport(false);
     setStatus("Song ready", "ready");
@@ -451,6 +460,7 @@
     updateSection(position);
   }
 
+  // ── セクション推定 ────────────────────────────────────────────
   // 再生位置とサビ/歌詞状態から ①〜⑤ のセクションを推定して配信する
   function updateSection(position) {
     const rawId = rawSectionId(position);
@@ -507,6 +517,7 @@
     window.TextPV?.onSection?.(state.section, position);
   }
 
+  // ── 歌詞状態 / アニメーション割り当て ────────────────────────
   function updateLyricState(position) {
     const video = player.video;
     const lyric = state.lyric;
@@ -707,6 +718,7 @@
     window.TextPV?.reset?.();
   }
 
+  // ── UI / ユーティリティ ───────────────────────────────────────
   function disableTransport(disabled) {
     [elements.play, elements.pause, elements.stop, elements.rewind, elements.seek].forEach((element) => {
       element.disabled = disabled;
