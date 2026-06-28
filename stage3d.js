@@ -179,11 +179,11 @@ const SHOTS = [
   { label: "Shot 02 / Close face arc", az: 28, orbit: -32, el0: 12, el1: 18, radius0: 3.45, radius1: 3.0, y: 1.48, fov: 31 },
   { label: "Shot 03 / Left runway", az: -82, orbit: 48, el0: 4, el1: 9, radius0: 5.4, radius1: 4.9, y: 1.12, x: -0.18, fov: 38 },
   { label: "Shot 04 / High sweep", az: 142, orbit: 76, el0: 34, el1: 48, radius0: 7.2, radius1: 6.2, y: 1.18, fov: 48 },
-  { label: "Shot 05 / Low chase", az: 212, orbit: -64, el0: -7, el1: 3, radius0: 5.8, radius1: 4.6, y: 0.9, fov: 46 },
+  { label: "Shot 05 / Low front", az: 22, orbit: -30, el0: -8, el1: 2, radius0: 5.2, radius1: 4.2, y: 0.9, fov: 46 },
   { label: "Shot 06 / Back halo", az: 176, orbit: 42, el0: 10, el1: 22, radius0: 4.8, radius1: 4.2, y: 1.28, fov: 36 },
-  { label: "Shot 07 / Wide orbit", az: 250, orbit: 112, el0: 7, el1: 12, radius0: 8.0, radius1: 6.8, y: 1.12, fov: 50 },
+  { label: "Shot 07 / Wide front", az: -28, orbit: 62, el0: 7, el1: 13, radius0: 7.8, radius1: 6.6, y: 1.12, fov: 50 },
   { label: "Shot 08 / Side close", az: 84, orbit: -44, el0: 8, el1: 15, radius0: 3.8, radius1: 3.3, y: 1.36, x: 0.18, fov: 33 },
-  { label: "Shot 09 / Spiral drop", az: -132, orbit: 94, el0: 42, el1: 8, radius0: 6.5, radius1: 5.0, y: 1.15, fov: 42 },
+  { label: "Shot 09 / Front drop", az: 18, orbit: -52, el0: 40, el1: 9, radius0: 6.2, radius1: 4.8, y: 1.15, fov: 42 },
   { label: "Shot 10 / Long chase", az: 322, orbit: 68, el0: 3, el1: 10, radius0: 9.0, radius1: 7.2, y: 1.05, x: -0.28, fov: 52 },
 ];
 
