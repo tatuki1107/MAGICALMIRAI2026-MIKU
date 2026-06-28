@@ -4,7 +4,7 @@
 Twinfield さんの **TAKEOVER** を題材に、TextAlive App API の歌詞・拍・サビ・声量情報と Three.js の 3D ステージを同期させた、ライブ会場型のリリック PV として制作しています。
 
 - 対象楽曲: **TAKEOVER / Twinfield** (<https://piapro.jp/t/E2i3>)
-- 歌詞情報: TextAlive App API / Songle API 経由で取得
+- 歌詞情報: TextAlive App API 経由で取得
 - 画面演出: 3D モデル、カメラワーク、歌詞タイポグラフィ、終盤の暗転・リプレイ導線
 
 ## 作品のアピールポイント
@@ -43,12 +43,11 @@ npx serve .
 | ファイル | 役割 |
 | --- | --- |
 | `index.html` | 画面の骨格、CDN 読み込み、スタート/リプレイ画面 |
-| `style.css` | 3D ステージ上に重なる歌詞 PV、開始画面、リプレイ画面、トーストのスタイル |
+| `style.css` | 3D ステージ上に重なる歌詞 PV、開始画面、リプレイ画面のスタイル |
 | `app.js` | TextAlive Player の初期化、楽曲ロード、再生状態・歌詞・拍・サビ・声量の共有 |
 | `stage3d.js` | Three.js のメインステージ、GLB モデル、カメラ演出、ブルーム、床リング、流れ星 |
 | `textpv.js` | フレーズごとの歌詞タイポグラフィ、variant/tone 選択、キーワード強調 |
 | `lyrics3d.js` | 曲終了時の `TAKEOVER` 遠ざかり演出 |
-| `bg.js` / `dancer.js` | 以前の背景・ダンサー実験モジュール。本番の `index.html` からは読み込んでいません |
 
 ## 同期の仕組み
 
@@ -87,7 +86,7 @@ npx serve .
 - [Three.js](https://threejs.org/) 0.165.0
 - axios 1.17.0
 
-本番ページは CDN 読み込みのみで動作し、ビルド工程はありません。GLB の検査用に `@gltf-transform/core` と `@gltf-transform/extensions` を開発補助として利用しています。
+本番ページは CDN 読み込みのみで動作し、ビルド工程はありません。
 
 ## 動作確認
 

@@ -1,6 +1,6 @@
 /**
  * textpv.js — 歌詞テキスト PV エンジン
- * フレーズ・単語・文字イベントを受け取り、セクションごとの variant / tone で
+ * フレーズイベントを受け取り、セクションごとの variant / tone で
  * DOM アニメーション演出を生成する。
  * window.TextPV を公開し、app.js からイベントを受け取る。
  *
@@ -22,12 +22,8 @@
     'より','から','まで','ばかり','だけ','しか','ので','けど',
     'て','し','な','ね','よ','か','わ','って','ってな','じゃ',
   ]);
-  const MAX_WORD_HITS = 7;
-  const MAX_CHAR_TICKS = 12;
 
   let lastPhraseIndex = 0;
-  let wordHitIndex = 0;
-  let charTickIndex = 0;
 
   // ── セクションごとの視覚言語 ─────────────────────────────────
   // variant/tones はフレーズ本文のハッシュ値でセクション内から選択されるため、
@@ -54,8 +50,6 @@
   // 直前と同じ見た目を避けるための記憶
   let lastVariant = "";
   let lastTone = "";
-  let lastWordLane = -1;
-  let lastTickDot = -1;
 
   let vocalRaf = 0;
 
@@ -63,12 +57,6 @@
   window.TextPV = {
     /** フレーズ開始時に演出要素を生成する */
     onPhrase,
-    /** 単語タイミング (現在は no-op) */
-    onWord,
-    /** 文字タイミング (現在は no-op) */
-    onChar,
-    /** セクション変化時 (現在は no-op) */
-    onSection,
     /** 再生リセット時に全演出要素と状態を初期化する */
     reset,
   };
@@ -125,18 +113,6 @@
 
     // 余韻を持たせて消す (唐突に消えると読めない)
     schedule(() => removePhrase(entry), duration + 1000);
-  }
-
-  function onWord(_word) {
-    // 単語バッジ削除済み
-  }
-
-  function onChar(_char) {
-    // キャラクタティック削除済み
-  }
-
-  function onSection(_section) {
-    // セクションバナー・スキャンライン削除済み
   }
 
   // ── Step 1: typewriter ──────────────────────────────────────────
@@ -286,12 +262,8 @@
     timers.clear();
     activePhrases.splice(0, activePhrases.length);
     lastPhraseIndex = 0;
-    wordHitIndex = 0;
-    charTickIndex = 0;
     lastVariant = "";
     lastTone = "";
-    lastWordLane = -1;
-    lastTickDot = -1;
     layer.style.removeProperty("--pv-vocal");
     layer.replaceChildren();
   }
@@ -461,13 +433,6 @@
     schedule(() => entry.element.remove(), 360);
   }
 
-  function trimFloating(selector, max) {
-    const nodes = layer.querySelectorAll(selector);
-    nodes.forEach((node, index) => {
-      if (index < nodes.length - max) node.remove();
-    });
-  }
-
   function schedule(fn, delay) {
     const timer = window.setTimeout(() => {
       timers.delete(timer);
@@ -526,14 +491,6 @@
     let idx = Math.abs(seed) % list.length;
     if (list.length > 1 && list[idx] === avoid) idx = (idx + 1) % list.length;
     return list[idx];
-  }
-
-  // lane/dot を直前回避つきで選ぶ
-  function nextLane(count, get, set) {
-    let next = Math.floor(Math.random() * count);
-    if (count > 1 && next === get()) next = (next + 1) % count;
-    set(next);
-    return next;
   }
 
   function hashText(text) {

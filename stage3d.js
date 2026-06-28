@@ -110,29 +110,6 @@ const colorB = new THREE.Color(0xff5ca8);
 const colorC = new THREE.Color(0xffd166);
 const tmpColor = new THREE.Color();
 
-// ── Stage spotlight rig ───────────────────────────────────────
-const SPOT_COUNT = 0;
-const SPOT = {
-  baseIntensity: 16,
-  beatBoost: 24,
-  chorusBoost: 12,
-  vocalBoost: 9,
-  angle: 0.28,
-  penumbra: 0.82,
-  distance: 32,
-  decay: 1.1,
-  height: 7.6,
-  ringRadius: 6.6,
-  scanRadius: 1.7,
-  scanSpeed: 0.5,
-  beamOpacity: 0.05,
-};
-const SPOT_COLORS = [colorA, colorB, colorC, colorB];
-const spotAim = new THREE.Vector3();
-const spotTmp = new THREE.Color();
-let spotTime = 0;
-const spotlights = buildSpotlights();
-
 // ── Bloom ───────────────────────────────────────────────────
 const BLOOM = {
   strength: 0.55,
@@ -702,7 +679,6 @@ function updateScene(dt) {
 
   updateVisualizer(dt, beat, vocal, grade);
   updateShootingStars(dt);
-  updateSpotlights(dt, beat, chorus, vocal);
 }
 
 function startOutroFade() {
@@ -793,97 +769,6 @@ function updateMorphs(dt) {
   if (morph.blink >= 0) infl[morph.blink] = clamp(blinkValue, 0, 1);
   if (morph.smile >= 0) {
     infl[morph.smile] = clamp(infl[morph.smile] + (smileTarget - infl[morph.smile]) * dt * 2, 0, 0.8);
-  }
-}
-
-function buildSpotlights() {
-  const rig = [];
-  const beamGeo = SPOT.beamOpacity > 0 ? makeBeamGeometry(SPOT.height + 1.5, SPOT.angle) : null;
-
-  for (let i = 0; i < SPOT_COUNT; i += 1) {
-    const baseAngle = (i / SPOT_COUNT) * Math.PI * 2;
-    const color = SPOT_COLORS[i % SPOT_COLORS.length];
-    const spot = new THREE.SpotLight(
-      color.getHex(),
-      0,
-      SPOT.distance,
-      SPOT.angle,
-      SPOT.penumbra,
-      SPOT.decay,
-    );
-    spot.position.set(
-      Math.cos(baseAngle) * SPOT.ringRadius,
-      SPOT.height + (i % 2) * 1.1,
-      Math.sin(baseAngle) * SPOT.ringRadius,
-    );
-    spot.target.position.set(0, modelCenterY, 0);
-    scene.add(spot);
-    scene.add(spot.target);
-
-    let beam = null;
-    if (beamGeo) {
-      beam = new THREE.Mesh(
-        beamGeo,
-        new THREE.MeshBasicMaterial({
-          color: color.clone(),
-          transparent: true,
-          opacity: 0,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-          fog: false,
-        }),
-      );
-      beam.position.copy(spot.position);
-      scene.add(beam);
-    }
-
-    rig.push({ spot, beam, phase: baseAngle, color });
-  }
-  return rig;
-}
-
-function makeBeamGeometry(length, angle) {
-  const baseRadius = Math.tan(angle) * length;
-  const geo = new THREE.ConeGeometry(baseRadius, length, 24, 1, true);
-  geo.translate(0, -length / 2, 0);
-  geo.rotateX(Math.PI / 2);
-  return geo;
-}
-
-function updateSpotlights(dt, beat, chorus, vocal) {
-  if (!spotlights.length) return;
-  spotTime += dt;
-
-  const scanSpeed = SPOT.scanSpeed * (1 + chorus * 1.4);
-  const scanRadius = SPOT.scanRadius * (1 + chorus * 0.8);
-
-  for (let i = 0; i < spotlights.length; i += 1) {
-    const { spot, beam, phase, color } = spotlights[i];
-
-    spotAim.set(
-      Math.sin(spotTime * scanSpeed + phase) * scanRadius,
-      modelCenterY + Math.sin(spotTime * scanSpeed * 0.6 + phase * 1.7) * 0.5,
-      Math.cos(spotTime * scanSpeed * 0.8 + phase) * scanRadius,
-    );
-    spot.target.position.lerp(spotAim, 0.1);
-    spot.target.updateMatrixWorld();
-
-    spotTmp.copy(color).lerp(colorB, chorus * 0.6);
-    spot.color.copy(spotTmp);
-
-    const beatPhase = 0.6 + 0.4 * Math.sin(phase * 2);
-    spot.intensity =
-      SPOT.baseIntensity +
-      beat * SPOT.beatBoost * beatPhase +
-      chorus * SPOT.chorusBoost +
-      vocal * SPOT.vocalBoost;
-
-    if (beam) {
-      beam.lookAt(spot.target.position);
-      beam.material.color.copy(spotTmp);
-      beam.material.opacity = SPOT.beamOpacity * (0.5 + beat * 0.9 + chorus * 0.5 + vocal * 0.4);
-    }
   }
 }
 
