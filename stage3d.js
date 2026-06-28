@@ -67,7 +67,11 @@ let lastPhraseIndex = 0;
 let previousPlaying = false;
 let introTriggered = false;
 let outroTriggered = false;
+let outroFadeStartTime = -1;
 let lastSceneCueId = null;
+
+const OUTRO_FADE_DELAY = 3500;
+const OUTRO_FADE_DURATION = 3000;
 
 // 表情モーフ (D-3) — モデルに morphTarget があれば歌唱に同期
 let morphMesh = null;
@@ -99,23 +103,21 @@ const colorC = new THREE.Color(0xffd166);
 const tmpColor = new THREE.Color();
 
 // ── Stage spotlight rig ───────────────────────────────────────
-// ライブ会場風の可動スポット。被写体を照らしつつ拍/サビ/声量に反応して
-// 首を振り、色と輝度が脈動する。調整しやすいよう値は定数化。
 const SPOT_COUNT = 0;
 const SPOT = {
-  baseIntensity: 16, // 1灯あたりの基準輝度(candela)
-  beatBoost: 24, // 拍パルスで加算
-  chorusBoost: 12, // サビ時の上乗せ
-  vocalBoost: 9, // 声量で底上げ
-  angle: 0.28, // 円錐の開き(rad)
-  penumbra: 0.82, // 縁のソフトさ
+  baseIntensity: 16,
+  beatBoost: 24,
+  chorusBoost: 12,
+  vocalBoost: 9,
+  angle: 0.28,
+  penumbra: 0.82,
   distance: 32,
   decay: 1.1,
-  height: 7.6, // 灯の高さ
-  ringRadius: 6.6, // 灯の配置半径
-  scanRadius: 1.7, // ターゲット走査の振れ幅(通常時)
-  scanSpeed: 0.5, // 走査速度(通常時)
-  beamOpacity: 0.05, // ビームコーンの基準不透明度(0 で無効)
+  height: 7.6,
+  ringRadius: 6.6,
+  scanRadius: 1.7,
+  scanSpeed: 0.5,
+  beamOpacity: 0.05,
 };
 const SPOT_COLORS = [colorA, colorB, colorC, colorB];
 const spotAim = new THREE.Vector3();
@@ -123,14 +125,13 @@ const spotTmp = new THREE.Color();
 let spotTime = 0;
 const spotlights = buildSpotlights();
 
-// ── Bloom (Emission 発光の前提) ───────────────────────────────
-// 発光ライン/スポットだけを滲ませる。threshold 高めで肌や黒衣装は滲ませない。
+// ── Bloom ───────────────────────────────────────────────────
 const BLOOM = {
   strength: 0.55,
   radius: 0.4,
   threshold: 0.82,
-  beatBoost: 0.35, // 拍で加算
-  chorusBoost: 0.3, // サビで加算
+  beatBoost: 0.35,
+  chorusBoost: 0.3,
 };
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
@@ -145,14 +146,14 @@ composer.addPass(new OutputPass());
 composer.setPixelRatio(renderer.getPixelRatio());
 
 // ── 星空 / オーディオビジュアライザー / 流れ星 ───────────────
-const VIZ_BARS = 72; // 放射バーの本数
-const VIZ_INNER = 0.7; // 開始半径
-const VIZ_MAX_LEN = 3.2; // 最大の伸び
+const VIZ_BARS = 72;
+const VIZ_INNER = 0.7;
+const VIZ_MAX_LEN = 3.2;
 const vizValues = new Float32Array(VIZ_BARS);
 let vizGeo = null;
 
-const SHOOT_MAX = 18; // 流れ星の最大同時数
-const SHOOT_HIDDEN = -9999; // 非アクティブ時に視界外へ退避
+const SHOOT_MAX = 18;
+const SHOOT_HIDDEN = -9999;
 const shootState = [];
 let shootSpawnTimer = 0;
 let shootHeadGeo = null;
@@ -172,7 +173,6 @@ scene.add(shooting.lines);
 
 const OPENING_SHOT = { label: "Opening / Front", az: 0, orbit: 0, el0: 8, el1: 10, radius0: 5.8, radius1: 5.6, y: 1.22, fov: 40 };
 const INTRO_SHOT   = { label: "Intro / Fly in",   az: 180, orbit: -180, el0: 32, el1: 10, radius0: 80.0, radius1: 5.8, y: 1.22, fov: 42 };
-const OUTRO_SHOT   = { label: "Outro / Pull back", az: 0, orbit: 120, el0: 10, el1: 32, radius0: 5.8, radius1: 48.0, y: 1.22, fov: 58 };
 
 const SHOTS = [
   { label: "Shot 01 / Front rise", az: -18, orbit: 54, el0: 7, el1: 15, radius0: 7.0, radius1: 6.0, y: 1.18, fov: 42 },
@@ -187,58 +187,40 @@ const SHOTS = [
   { label: "Shot 10 / Long chase", az: 322, orbit: 68, el0: 3, el1: 10, radius0: 9.0, radius1: 7.2, y: 1.05, x: -0.28, fov: 52 },
 ];
 
-// ── S1〜S10 シーン別カメラキュー (ms) ────────────────────────────────
-// 冒頭イントロ〜サビ前まで、歌詞の意味と連動したカメラ演出を行う。
-// フレーズベースの自動切り替えより優先され、endMs を超えると通常システムに戻る。
 const SCENE_CUES = [
-  // S1: 暗転フェードイン → 顔のドアップ
   { id: "S1",  startMs:  1300, endMs:  2400,
     label: "S1 Face extreme",
     az:   5, orbit:   8, el0: 16, el1: 18, radius0: 1.8, radius1: 1.6, y: 1.65, fov: 22, dur: 1500 },
-  // S1b: スクランブルランブル → バストショットへ引く
   { id: "S1b", startMs:  2400, endMs:  3700,
     label: "S1b Bust",
     az:  15, orbit: -18, el0: 12, el1: 14, radius0: 2.8, radius1: 2.6, y: 1.42, fov: 28, dur: 1800 },
-  // S2: 斜め横から緩やかに回り込み
   { id: "S2",  startMs:  3700, endMs:  6800,
     label: "S2 Side arc",
     az: -55, orbit:  70, el0:  6, el1: 12, radius0: 4.2, radius1: 3.8, y: 1.15, fov: 38, dur: 2500 },
-  // S3: 斜め構図を維持
   { id: "S3",  startMs:  6800, endMs:  8840,
     label: "S3 Diagonal",
     az:  40, orbit: -30, el0:  8, el1: 12, radius0: 3.6, radius1: 3.2, y: 1.22, fov: 34, dur: 1200 },
-  // S3a: キューピッドアロー「矢を放つ」→ 正面・目線合わせ（一点のみ）
   { id: "S3a", startMs:  8840, endMs:  9200,
     label: "S3a Arrow snap",
     az:   0, orbit:   0, el0:  8, el1:  8, radius0: 2.6, radius1: 2.6, y: 1.35, fov: 30, dur: 400 },
-  // S4: 光と影飲み込む → 俯瞰気味アングル
   { id: "S4",  startMs:  9200, endMs: 12450,
     label: "S4 High angle",
     az: 150, orbit:  60, el0: 38, el1: 50, radius0: 6.0, radius1: 5.2, y: 1.18, fov: 46, dur: 1800 },
-  // S5: 調律されてる鼓動？→ 急接近（覚醒の境界線）
-  // { id: "S5",  startMs: 12450, endMs: 13400,
-  //   label: "S5 Zoom in",
-  //   az:   8, orbit:  12, el0: 14, el1: 18, radius0: 1.7, radius1: 1.5, y: 1.62, fov: 20, dur: 600 },
-  // S6: くだらない言葉吹き飛ばす → 横移動・躍動感
   { id: "S6",  startMs: 13400, endMs: 15200,
     label: "S6 Side slide",
     az: -75, orbit:  80, el0:  5, el1: 10, radius0: 4.0, radius1: 3.6, y: 1.10, fov: 38, dur: 900 },
-  // S7: 私たちは世界を変える → 煽りカメラ（ローアングル）
   { id: "S7",  startMs: 15200, endMs: 17400,
     label: "S7 低アングル煽り",
     az:  10, orbit: -20, el0: -12, el1: -6, radius0: 3.2, radius1: 2.8, y: 0.5, fov: 44, dur: 1000 },
-  // S8: さあアップ＆ダウン → ダイナミック広角
   { id: "S8",  startMs: 17400, endMs: 20200,
     label: "S8 Dynamic wide",
     az: -120, orbit: 100, el0:  5, el1: 14, radius0: 6.5, radius1: 5.5, y: 1.10, fov: 50, dur: 1500 },
-  // S9: このリアル掌返して → 180°ターン
   { id: "S9",  startMs: 20200, endMs: 22500,
     label: "S9 180ターン",
     az: 175, orbit: 185, el0:  8, el1: 12, radius0: 3.8, radius1: 3.5, y: 1.20, fov: 38, dur: 800 },
-  // S10: 皆テイクオーバー → 初フルショット（最大引き）
-  { id: "S10", startMs: 22500, endMs: 24000,
-    label: "S10 First full shot",
-    az:   5, orbit:  20, el0:  4, el1:  8, radius0: 8.5, radius1: 7.8, y: 1.00, fov: 52, dur: 700 },
+  { id: "S10", startMs: 22500, endMs: 99000,
+    label: "S10 Outro front",
+    az:   0, orbit:   0, el0:  8, el1:  8, radius0: 6.0, radius1: 6.0, y: 1.22, fov: 46, dur: 800 },
 ];
 
 const cam = {
@@ -256,6 +238,9 @@ let activeShot = {
   duration: 5000,
   from: { ...cam },
 };
+
+let interludeShotIndex = 0;
+let interludeNextShotAt = 0;
 
 // ── パーティクルテキスト（Step 5） ─────────────────────────────────
 let activeParticle = null;
@@ -330,7 +315,6 @@ function spawnBgBoard(text, color) {
     mesh.position.set(0, modelCenterY + 0.15, -1.5);
     scene.add(mesh);
 
-    // ── タイプインアニメーション ─────────────────────────────────
     let visibleCount = 0;
     const CHAR_MS = Math.max(40, Math.min(100, 700 / chars.length));
     let lastCharAt = performance.now();
@@ -359,7 +343,6 @@ function spawnBgBoard(text, color) {
     cancelAnimationFrame(rafId);
     if (!mat) return;
 
-    // ── 左へ流れながらフェードアウト ────────────────────────────
     const flowOut = () => {
       if (!mat) return;
       mesh.position.x -= 0.15;
@@ -462,7 +445,6 @@ function onPhrase(phrase) {
   lastPhraseIndex = index;
 
   let shot = SHOTS[(index - 1) % SHOTS.length];
-  // フィナーレ中にアングル4が来た場合はアングル10に変更（Bサビ後の余韻対策）
   if (sectionId === "finale" && shot === SHOTS[3]) {
     shot = SHOTS[9];
   }
@@ -490,7 +472,11 @@ function reset() {
   previousPlaying = false;
   introTriggered = false;
   outroTriggered = false;
+  outroFadeStartTime = -1;
+  canvas.style.opacity = "1";
   lastSceneCueId = null;
+  interludeShotIndex = 0;
+  interludeNextShotAt = 0;
   phrasePulse = 0;
   sectionId = "intro";
   targetEnergy = SECTION_VIS.intro.energy;
@@ -529,16 +515,36 @@ function tick(now) {
     shotName.textContent = INTRO_SHOT.label;
   }
 
-  // 再生終了 → アウトロカメラ（正面からゆっくり引いていく）
+  // 再生終了 → 最後のアングルからそのまま引いてフェードアウト
   if (previousPlaying && !playing && !outroTriggered && lastPhraseIndex > 0) {
     outroTriggered = true;
+    outroFadeStartTime = now + OUTRO_FADE_DELAY;
+    const outroLabel = "Outro / Pull back";
+    const outroShot = {
+      label: outroLabel,
+      az: cam.az,
+      orbit: 25,
+      el0: cam.el,
+      el1: Math.min(cam.el + 20, 50),
+      radius0: cam.radius,
+      radius1: 52,
+      x: cam.x,
+      y: cam.y,
+      fov: cam.fov + 12,
+    };
     activeShot = {
-      ...OUTRO_SHOT,
+      ...outroShot,
       startedAt: performance.now(),
       duration: 8000,
       from: { ...cam },
     };
-    shotName.textContent = OUTRO_SHOT.label;
+    shotName.textContent = outroLabel;
+  }
+
+  // フェードアウト
+  if (outroTriggered && outroFadeStartTime > 0 && now >= outroFadeStartTime) {
+    const fadeProgress = Math.min(1, (now - outroFadeStartTime) / OUTRO_FADE_DURATION);
+    canvas.style.opacity = String(1 - fadeProgress);
   }
   previousPlaying = playing;
 
@@ -566,7 +572,6 @@ function tick(now) {
       }
     }
 
-    // フレーズ切り替え: シーンキュー有効中は抑制（インデックスだけ同期してずれを防ぐ）
     if (state.phraseIndex && state.phraseIndex !== lastPhraseIndex) {
       if (!cue) {
         onPhrase(state.phrase || { index: state.phraseIndex, startTime: 0, endTime: 3600 });
@@ -574,6 +579,21 @@ function tick(now) {
         lastPhraseIndex = state.phraseIndex;
       }
     }
+  }
+
+  // 間奏中: 定期的にショットを切り替えてカメラを動かし続ける
+  if (sectionId === "interlude" && playing && interludeNextShotAt > 0 && now >= interludeNextShotAt) {
+    interludeShotIndex = (interludeShotIndex + 1) % SHOTS.length;
+    const shotDur = 3600 + Math.random() * 1400;
+    const shot = SHOTS[interludeShotIndex];
+    activeShot = {
+      ...shot,
+      startedAt: now,
+      duration: shotDur,
+      from: { ...cam },
+    };
+    interludeNextShotAt = now + shotDur;
+    shotName.textContent = shot.label;
   }
 
   if (mixer) {
@@ -588,8 +608,6 @@ function tick(now) {
   beatPulse = Math.max(0, beatPulse - dt * 4.2);
   phrasePulse = Math.max(0, phrasePulse - dt * 1.7);
   ringPulse = Math.max(0, ringPulse - dt * 1.4);
-
-  // activeParticle は CSS ベースに変更したため tick 不要
 
   updateMorphs(dt);
   updateCamera(now, dt);
@@ -606,13 +624,16 @@ function updateCamera(now, dt) {
   const pathP = easeInOutSine(p);
   const settle = easeOutCubic(clamp(elapsed / Math.min(760, activeShot.duration * 0.32), 0, 1));
 
+  // ── アウトロ中は揺れ・ビートパルスを完全に止めて正面に静止させる ──
+  const isOutro = outroTriggered;
+
   const desired = {
     az: activeShot.az + activeShot.orbit * pathP,
-    el: lerp(activeShot.el0, activeShot.el1, pathP) + Math.sin(now * 0.0007) * 1.2,
-    radius: lerp(activeShot.radius0, activeShot.radius1, pathP) - beatPulse * 0.08,
+    el: lerp(activeShot.el0, activeShot.el1, pathP) + (isOutro ? 0 : Math.sin(now * 0.0007) * 1.2),
+    radius: lerp(activeShot.radius0, activeShot.radius1, pathP) - (isOutro ? 0 : beatPulse * 0.08),
     x: activeShot.x || 0,
     y: activeShot.y || modelCenterY,
-    fov: activeShot.fov - phrasePulse * 1.5,
+    fov: activeShot.fov - (isOutro ? 0 : phrasePulse * 1.5),
   };
 
   const narrowViewport = clamp((0.78 - camera.aspect) / 0.36, 0, 1);
@@ -626,14 +647,14 @@ function updateCamera(now, dt) {
   cam.y = lerp(activeShot.from.y, desired.y, settle);
   cam.fov = lerp(activeShot.from.fov, desired.fov, settle);
 
-  if (!state.phraseIndex) {
+  if (!state.phraseIndex && !outroTriggered) {
     cam.az += dt * 6;
   }
 
   const az = THREE.MathUtils.degToRad(cam.az);
   const el = THREE.MathUtils.degToRad(cam.el);
   const cosEl = Math.cos(el);
-  const liveY = cam.y + (state.lyric?.vocal || 0) * 0.08 + phrasePulse * 0.08;
+  const liveY = cam.y + (isOutro ? 0 : (state.lyric?.vocal || 0) * 0.08 + phrasePulse * 0.08);
 
   target.set(cam.x, liveY, 0);
   currentTarget.lerp(target, 0.16);
@@ -654,16 +675,14 @@ function updateScene(dt) {
   const vocal = state.lyric?.vocal || 0;
   const beat = beatPulse;
 
-  // セクションのエネルギー/モチーフ強度をなめらかに追従
   sectionEnergy += (targetEnergy - sectionEnergy) * Math.min(dt * 1.5, 1);
   motifIntensity += (targetMotif - motifIntensity) * Math.min(dt * 1.5, 1);
-  const grade = Math.max(chorus, sectionEnergy); // 配色を桃色へ寄せる量
+  const grade = Math.max(chorus, sectionEnergy);
 
   floorGroup.rotation.y += dt * (0.06 + grade * 0.1);
   stars.rotation.y += dt * 0.006;
   vizGroup.rotation.y += dt * 0.04;
 
-  // 信号リング: 拍でステージ床が外へ広がる
   const ringScale = 1 + ringPulse * 0.22 * (0.5 + motifIntensity);
   floorGroup.scale.setScalar(ringScale);
 
@@ -677,7 +696,6 @@ function updateScene(dt) {
     modelRoot.traverse((node) => {
       if (!node.isMesh || !node.material) return;
       if ("emissiveIntensity" in node.material) {
-        // 発光ラインを Bloom に乗せる: エネルギーが高いほど強く光る
         node.material.emissiveIntensity = 0.25 + beat * 0.5 + sectionEnergy * 0.6;
       }
     });
@@ -688,14 +706,12 @@ function updateScene(dt) {
   updateSpotlights(dt, beat, chorus, vocal);
 }
 
-// セクション切替 (app.js から呼ばれる)
 function onSection(section) {
   sectionId = section?.id || "intro";
   const vis = SECTION_VIS[sectionId] || SECTION_VIS.intro;
   targetEnergy = vis.energy;
   targetMotif = vis.motif;
 
-  // サビ/フィナーレ突入は「空間が切り替わる」インパクトを出す
   if (sectionId === "chorus" || sectionId === "finale") {
     const impact = sectionId === "finale" ? SHOTS[6] : SHOTS[3];
     activeShot = {
@@ -709,6 +725,19 @@ function onSection(section) {
     shotName.textContent = impact.label;
   }
 
+  if (sectionId === "interlude") {
+    interludeShotIndex = lastPhraseIndex % SHOTS.length;
+    const shotDur = 4000;
+    const shot = SHOTS[interludeShotIndex];
+    activeShot = {
+      ...shot,
+      startedAt: performance.now(),
+      duration: shotDur,
+      from: { ...cam },
+    };
+    interludeNextShotAt = performance.now() + shotDur;
+    shotName.textContent = shot.label;
+  }
 }
 
 // ── 表情モーフ (D-3) ──────────────────────────────────────────
@@ -719,10 +748,9 @@ function setupMorphs(rootObj) {
     if (morphMesh || !node.isMesh || !node.morphTargetDictionary) return;
     morphMesh = node;
   });
-  if (!morphMesh) return; // モーフ無し(仮モデル等)は何もしない
+  if (!morphMesh) return;
 
   const dict = morphMesh.morphTargetDictionary;
-  // 想定モデルのモーフ名は未確定なので候補を広く当て、部分一致でも拾う
   morph.mouth = resolveMorph(dict, ["あ", "aa", "A", "mouth", "口開け", "Fcl_MTH_A", "vrc.v_aa"]);
   morph.blink = resolveMorph(dict, ["まばたき", "blink", "目閉じ", "eye_close", "Fcl_EYE_Close"]);
   morph.smile = resolveMorph(dict, ["笑い", "笑顔", "smile", "joy", "happy", "Fcl_ALL_Joy"]);
@@ -741,15 +769,16 @@ function resolveMorph(dict, names) {
 }
 
 function updateMorphs(dt) {
+  if (outroTriggered) {
+    console.log("OUTRO activeShot:", activeShot.label, "az:", cam.az.toFixed(2));
+  }
   if (!morphMesh || !morphMesh.morphTargetInfluences) return;
   const infl = morphMesh.morphTargetInfluences;
   const playing = !!state.isPlaying;
 
-  // 口: 声量に追従(アタック速・リリース遅)
   const mouthTarget = playing ? state.lyric?.vocal || 0 : 0;
   mouthValue += (mouthTarget - mouthValue) * (mouthTarget > mouthValue ? 0.5 : 0.12);
 
-  // 瞬き: 2〜5秒間隔で短く閉じる
   blinkTimer -= dt;
   if (blinkTimer <= 0) {
     blinkValue = 1;
@@ -757,7 +786,6 @@ function updateMorphs(dt) {
   }
   blinkValue = Math.max(0, blinkValue - dt * 7);
 
-  // 笑顔: サビ/フィナーレで緩やかに
   const smileTarget = sectionId === "chorus" || sectionId === "finale" ? 0.6 : 0;
 
   if (morph.mouth >= 0) infl[morph.mouth] = clamp(mouthValue, 0, 1);
@@ -814,7 +842,6 @@ function buildSpotlights() {
   return rig;
 }
 
-// 頂点を原点・-Z 方向へ伸ばした円錐。lookAt でターゲットへ向けて使う。
 function makeBeamGeometry(length, angle) {
   const baseRadius = Math.tan(angle) * length;
   const geo = new THREE.ConeGeometry(baseRadius, length, 24, 1, true);
@@ -827,14 +854,12 @@ function updateSpotlights(dt, beat, chorus, vocal) {
   if (!spotlights.length) return;
   spotTime += dt;
 
-  // サビで走査が速く・広くなる
   const scanSpeed = SPOT.scanSpeed * (1 + chorus * 1.4);
   const scanRadius = SPOT.scanRadius * (1 + chorus * 0.8);
 
   for (let i = 0; i < spotlights.length; i += 1) {
     const { spot, beam, phase, color } = spotlights[i];
 
-    // リサージュ走査: 被写体(原点・modelCenterY)周囲をなめらかに描く
     spotAim.set(
       Math.sin(spotTime * scanSpeed + phase) * scanRadius,
       modelCenterY + Math.sin(spotTime * scanSpeed * 0.6 + phase * 1.7) * 0.5,
@@ -843,11 +868,9 @@ function updateSpotlights(dt, beat, chorus, vocal) {
     spot.target.position.lerp(spotAim, 0.1);
     spot.target.updateMatrixWorld();
 
-    // 色: サビで桃色寄り
     spotTmp.copy(color).lerp(colorB, chorus * 0.6);
     spot.color.copy(spotTmp);
 
-    // 輝度: 基準 + 拍(灯ごとに位相差) + サビ + 声量
     const beatPhase = 0.6 + 0.4 * Math.sin(phase * 2);
     spot.intensity =
       SPOT.baseIntensity +
@@ -885,7 +908,6 @@ function buildFloor() {
   }
 }
 
-// ステージを包む星空(大きな球殻に星を散らす)
 function buildStarfield() {
   const count = 1600;
   const positions = new Float32Array(count * 3);
@@ -898,7 +920,6 @@ function buildStarfield() {
     positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
     positions[i * 3 + 1] = r * Math.cos(phi);
     positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
-    // 白〜シアンのゆらぎ
     tint.copy(colorA).lerp(new THREE.Color(0xffffff), 0.45 + Math.random() * 0.55);
     colors[i * 3] = tint.r;
     colors[i * 3 + 1] = tint.g;
@@ -918,7 +939,6 @@ function buildStarfield() {
   return new THREE.Points(geo, material);
 }
 
-// 床リング中心から外側へ放射するオーディオビジュアライザー
 function buildVisualizer() {
   const positions = new Float32Array(VIZ_BARS * 2 * 3);
   for (let i = 0; i < VIZ_BARS; i += 1) {
@@ -948,7 +968,6 @@ function updateVisualizer(dt, beat, vocal, grade) {
   const pos = vizGeo.attributes.position.array;
   const t = clock.elapsedTime;
   for (let i = 0; i < VIZ_BARS; i += 1) {
-    // 疑似スペクトル: 複数サインの合成に拍/声量を乗せる
     const shape = 0.35 + 0.65 * Math.abs(Math.sin(i * 0.4 + t * 2.2)) * Math.abs(Math.cos(i * 0.13 - t * 1.3));
     const target = shape * (0.15 + beat * 0.6 + vocal * 1.0);
     vizValues[i] += (target - vizValues[i]) * Math.min(dt * 12, 1);
@@ -963,7 +982,6 @@ function updateVisualizer(dt, beat, vocal, grade) {
   viz.material.opacity = 0.5 + beat * 0.35 + grade * 0.2;
 }
 
-// 流れ星(ラスサビで降る)。頭=点群 / 尾=線分。
 function buildShootingStars() {
   const headPos = new Float32Array(SHOOT_MAX * 3).fill(SHOOT_HIDDEN);
   shootHeadGeo = new THREE.BufferGeometry();
@@ -1025,7 +1043,6 @@ function updateShootingStars(dt) {
   const linePos = shootLineGeo.attributes.position.array;
   const tailLen = 2.4;
 
-  // ラスサビ中のみ周期的に発生
   if (sectionId === "finale") {
     shootSpawnTimer -= dt;
     if (shootSpawnTimer <= 0) {
