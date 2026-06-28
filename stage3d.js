@@ -448,12 +448,19 @@ function onPhrase(phrase) {
   if (sectionId === "finale" && shot === SHOTS[3]) {
     shot = SHOTS[9];
   }
+  const maxDur = sectionId === "interlude" ? 4200 : 8200;
+  const dur = clamp((phrase.endTime - phrase.startTime) || 3600, 1400, maxDur);
   activeShot = {
     ...shot,
     startedAt: performance.now(),
-    duration: clamp((phrase.endTime - phrase.startTime) || 3600, 1400, 8200),
+    duration: dur,
     from: { ...cam },
   };
+
+  // 間奏中はサイクルタイマーをフレーズに合わせてカメラが止まらないようにする
+  if (sectionId === "interlude") {
+    interludeNextShotAt = performance.now() + dur;
+  }
 
   phrasePulse = 1;
   shotName.textContent = shot.label;
