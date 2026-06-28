@@ -31,10 +31,6 @@
   // ── DOM 参照 ──────────────────────────────────────────────
   const $ = (selector) => document.querySelector(selector);
   const elements = {
-    songTitle: $("#songTitle"),
-    artistName: $("#artistName"),
-    position: $("#position"),
-    duration: $("#duration"),
     beat: $("#beat"),
     chord: $("#chord"),
     chorus: $("#chorus"),
@@ -42,13 +38,6 @@
     wordCount: $("#wordCount"),
     charCount: $("#charCount"),
     events: $("#events"),
-    controlPanel: $("#controlPanel"),
-    play: $("#play"),
-    pause: $("#pause"),
-    stop: $("#stop"),
-    rewind: $("#rewind"),
-    jump: $("#jump"),
-    seek: $("#seek"),
     media: $("#media"),
   };
 
@@ -84,11 +73,9 @@
   let player = createPlayer();
   let duration = 0;
   let maxVocalAmplitude = 0;
-  let isSeeking = false;
   let lastPhraseStartTime = -1;
   let lastWordStartTime = -1;
   let lastCharStartTime = -1;
-  let lastPlayRequestAt = -Infinity;
   let pendingPlay = false;
   let playbackActive = false;
   let reachedEnd = false;
@@ -100,7 +87,6 @@
   let pendingSectionSince = 0;
 
   // ── 初期化 ────────────────────────────────────────────────
-  bindControls();
   bindStartScreen();
   bindReplay();
   initStartStars();
@@ -127,7 +113,6 @@
       onPause,
       onStop,
       onTimeUpdate,
-      onThrottledTimeUpdate: updatePosition,
     });
 
     return nextPlayer;
@@ -200,63 +185,6 @@
     window.setTimeout(() => { startScreen.hidden = true; }, 750);
   }
 
-  function bindControls() {
-    elements.play.addEventListener("pointerdown", requestPlayFromGesture);
-    elements.play.addEventListener("click", requestPlayFromGesture);
-
-    elements.pause.addEventListener("click", () => {
-      if (player.video) player.requestPause();
-    });
-
-    elements.stop.addEventListener("click", () => {
-      if (player.video) player.requestStop();
-    });
-
-    elements.rewind.addEventListener("click", () => {
-      if (player.video) player.requestMediaSeek(0);
-    });
-
-    elements.jump.addEventListener("click", () => {
-      const firstPhrase = player.video && player.video.firstPhrase;
-      if (firstPhrase) {
-        player.requestMediaSeek(firstPhrase.startTime);
-        registerPhrase(firstPhrase, firstPhrase.startTime);
-      }
-    });
-
-    elements.seek.addEventListener("input", () => {
-      isSeeking = true;
-      elements.position.textContent = formatTime(Number(elements.seek.value));
-    });
-
-    elements.seek.addEventListener("change", () => {
-      if (player.video) player.requestMediaSeek(Number(elements.seek.value));
-      isSeeking = false;
-    });
-  }
-
-  function requestPlayFromGesture(event) {
-    const now = performance.now();
-    if (now - lastPlayRequestAt < 300) {
-      event?.preventDefault?.();
-      return;
-    }
-
-    lastPlayRequestAt = now;
-    event?.preventDefault?.();
-
-    if (!player.video) return;
-
-    if (reachedEnd || endSequenceActive) {
-      location.reload();
-      return;
-    }
-
-    unlockMediaElement();
-    const accepted = player.requestPlay();
-    setStatus(accepted ? "Play requested" : "Waiting for audio permission", accepted ? "ready" : undefined);
-  }
-
   function unlockMediaElement() {
     const media = elements.media.querySelector("audio, video");
     if (!media || !media.paused) return;
@@ -293,7 +221,6 @@
     setStatus(mode, "ready");
     addEvent(`app ready: ${mode}`);
     player.volume = 8;
-    elements.controlPanel.classList.toggle("is-managed", app.managed);
 
     if (REQUIRES_HTTP) {
       setStatus(HTTP_REQUIRED_MESSAGE, "error");
@@ -310,7 +237,6 @@
     if (!mediaUrl) return;
     addEvent("media changed");
     resetSongState();
-    disableTransport(true);
   }
 
   function loadSong(songUrl) {
@@ -320,25 +246,20 @@
     }
 
     setStatus("Loading TextAlive song data");
-    disableTransport(true);
     resetSongState();
 
     player.createFromSongUrl(songUrl).catch((error) => {
       const message = error && error.message ? error.message : String(error);
       setStatus("Song data load failed", "error");
       addEvent(message);
-      disableTransport(false);
     });
   }
 
   function onVideoReady(video) {
     duration = Math.max(0, Math.ceil(video.duration || video.endTime || 0));
-    elements.seek.max = String(duration);
-    elements.duration.textContent = formatTime(duration);
     elements.phraseCount.textContent = `phrases ${video.phraseCount || 0}`;
     elements.wordCount.textContent = `words ${video.wordCount || 0}`;
     elements.charCount.textContent = `chars ${video.charCount || 0}`;
-    elements.jump.disabled = !video.firstPhrase;
 
     assignAnimation(video.firstPhrase, animatePhrase);
     assignAnimation(video.firstWord, animateWord);
@@ -360,17 +281,11 @@
     }
     ahaEndTime = lastAhaEndTime;
 
-    const song = player.data && player.data.song;
-    elements.songTitle.textContent = song && song.name ? song.name : "TAKEOVER";
-    elements.artistName.textContent = song && song.artist && song.artist.name ? song.artist.name : "Twinfield";
-
-    disableTransport(false);
     setStatus("Song ready", "ready");
     addEvent("video ready");
   }
 
   function onTimerReady() {
-    disableTransport(false);
     setStatus("Playback ready", "ready");
     addEvent("timer ready");
     if (pendingPlay) {
@@ -385,7 +300,6 @@
     reachedEnd = false;
     endSequenceActive = false;
     state.isPlaying = true;
-    setStatus("Playing", "ready");
     addEvent("play");
     clearTimeout(blackoutTimer);
     clearTimeout(replayTimer);
@@ -396,7 +310,7 @@
   function onPause() {
     const shouldShowReplay = playbackActive && reachedEnd;
     state.isPlaying = false;
-    setStatus("Paused", "ready");
+    if (!shouldShowReplay) setStatus("Paused", "info");
     addEvent("pause");
     // TextAlive は曲の自然終了時に onStop ではなく onPause を呼ぶ場合がある
     if (shouldShowReplay) {
@@ -426,7 +340,7 @@
     playbackActive = false;
     reachedEnd = false;
     state.isPlaying = false;
-    setStatus("Stopped", "ready");
+    if (!shouldShowReplay) setStatus("Stopped", "info");
     addEvent("stop");
     window.Lyrics3D?.onEnd?.();
     updatePosition(0);
@@ -658,11 +572,7 @@
   }
 
   function updatePosition(position) {
-    const safePosition = Math.max(0, Number(position) || 0);
-    elements.position.textContent = formatTime(safePosition);
-    if (!isSeeking) {
-      elements.seek.value = String(Math.min(duration, safePosition));
-    }
+    state.position = Math.max(0, Number(position) || 0);
   }
 
   function updateBeat(position) {
@@ -697,14 +607,9 @@
     lastPhraseStartTime = -1;
     lastWordStartTime = -1;
     lastCharStartTime = -1;
-    elements.songTitle.textContent = "TAKEOVER";
-    elements.artistName.textContent = "Twinfield";
     elements.phraseCount.textContent = "phrases -";
     elements.wordCount.textContent = "words -";
     elements.charCount.textContent = "chars -";
-    elements.seek.value = "0";
-    elements.seek.max = "0";
-    elements.duration.textContent = "0:00.000";
     document.documentElement.style.setProperty("--beat-progress", "0");
     document.documentElement.style.setProperty("--phrase-progress", "0");
     resetLiveState();
@@ -734,14 +639,7 @@
   }
 
   // ── UI / ユーティリティ ───────────────────────────────────────
-  function disableTransport(disabled) {
-    [elements.play, elements.pause, elements.stop, elements.rewind, elements.seek].forEach((element) => {
-      element.disabled = disabled;
-    });
-    elements.jump.disabled = disabled || !(player.video && player.video.firstPhrase);
-  }
-
-  function setStatus(_message, _variant) {}
+  function setStatus(_message, _variant = "info", _options = {}) {}
 
   function addEvent(message) {
     if (!elements.events) return;
@@ -751,14 +649,6 @@
     while (elements.events.children.length > 10) {
       elements.events.removeChild(elements.events.lastElementChild);
     }
-  }
-
-  function formatTime(ms) {
-    const totalMilliseconds = Math.max(0, Math.floor(Number(ms) || 0));
-    const minutes = Math.floor(totalMilliseconds / 60000);
-    const seconds = Math.floor((totalMilliseconds % 60000) / 1000);
-    const milliseconds = totalMilliseconds % 1000;
-    return `${minutes}:${String(seconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
   }
 
   function clamp01(value) {

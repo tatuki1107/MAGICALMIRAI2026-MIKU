@@ -14,9 +14,6 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
 // ── DOM / 共有状態 ────────────────────────────────────────────
 const canvas = document.getElementById("stage-canvas");
-const shotName = document.getElementById("shotName");
-const animationName = document.getElementById("animationName");
-const statusPill = document.getElementById("status");
 const state = window.MusicBG || {};
 
 // ── レンダラー ────────────────────────────────────────────────
@@ -403,7 +400,6 @@ requestAnimationFrame(tick);
 
 // ── モデル読み込み ────────────────────────────────────────────
 function loadModel() {
-  setStageStatus("Loading GLB animation");
   const modelUrl = new URL("./3D/素体9.glb", import.meta.url).href;
   new GLTFLoader().load(
     modelUrl,
@@ -424,19 +420,13 @@ function loadModel() {
           action.setLoop(THREE.LoopRepeat, Infinity);
           action.play();
         });
-        animationName.textContent = `Animation: ${clipsToPlay.map((clip) => clip.name || "clip").join(", ")}`;
-      } else {
-        animationName.textContent = "Animation: none";
       }
 
       modelLoaded = true;
-      setStageStatus("Model ready", "ready");
     },
     undefined,
     (error) => {
       console.error(error);
-      animationName.textContent = "Animation load failed";
-      setStageStatus("GLB load failed", "error");
     },
   );
 }
@@ -489,7 +479,6 @@ function onPhrase(phrase) {
   }
 
   phrasePulse = 1;
-  shotName.textContent = shot.label;
 }
 
 function reset() {
@@ -521,7 +510,6 @@ function reset() {
     s.active = false;
   });
   shootSpawnTimer = 0;
-  shotName.textContent = OPENING_SHOT.label;
 }
 
 // ── メインループ ──────────────────────────────────────────────
@@ -546,7 +534,6 @@ function tick(now) {
       duration: 5000,
       from: { ...cam },
     };
-    shotName.textContent = INTRO_SHOT.label;
   }
 
   // 再生終了 → startOutroFade() 未呼出の場合はここでフォールバック
@@ -582,7 +569,6 @@ function tick(now) {
           duration: cue.dur,
           from: { ...cam },
         };
-        shotName.textContent = cue.label;
       }
     }
 
@@ -607,7 +593,6 @@ function tick(now) {
       from: { ...cam },
     };
     interludeNextShotAt = now + shotDur;
-    shotName.textContent = shot.label;
   }
 
   if (mixer) {
@@ -743,7 +728,6 @@ function onSection(section) {
     };
     phrasePulse = 1;
     ringPulse = 1;
-    shotName.textContent = impact.label;
   }
 
   if (sectionId === "interlude") {
@@ -757,7 +741,6 @@ function onSection(section) {
       from: { ...cam },
     };
     interludeNextShotAt = performance.now() + shotDur;
-    shotName.textContent = shot.label;
   }
 }
 
@@ -1104,13 +1087,6 @@ function resize() {
   composer.setSize(width, height);
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
-}
-
-function setStageStatus(message, variant) {
-  if (!statusPill) return;
-  statusPill.textContent = message;
-  statusPill.classList.toggle("ready", variant === "ready");
-  statusPill.classList.toggle("error", variant === "error");
 }
 
 // ── 数学ユーティリティ ────────────────────────────────────────
