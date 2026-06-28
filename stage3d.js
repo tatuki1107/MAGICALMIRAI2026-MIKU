@@ -395,8 +395,9 @@ requestAnimationFrame(tick);
 
 function loadModel() {
   setStageStatus("Loading GLB animation");
+  const modelUrl = new URL("./3D/素体8test2.glb", import.meta.url).href;
   new GLTFLoader().load(
-    "./3D/test-animationn.glb",
+    modelUrl,
     (gltf) => {
       normalizeModel(gltf.scene);
       setupMorphs(gltf.scene);
@@ -404,12 +405,17 @@ function loadModel() {
 
       if (gltf.animations.length > 0) {
         mixer = new THREE.AnimationMixer(gltf.scene);
-        gltf.animations.forEach((clip) => {
+        const danceClips = gltf.animations.filter((clip) =>
+          typeof clip.name === "string" && clip.name.trim().toLowerCase() === "dance"
+        );
+        const clipsToPlay = danceClips.length > 0 ? danceClips : gltf.animations;
+
+        clipsToPlay.forEach((clip) => {
           const action = mixer.clipAction(clip);
           action.setLoop(THREE.LoopRepeat, Infinity);
           action.play();
         });
-        animationName.textContent = `Animation: ${gltf.animations.map((clip) => clip.name || "clip").join(", ")}`;
+        animationName.textContent = `Animation: ${clipsToPlay.map((clip) => clip.name || "clip").join(", ")}`;
       } else {
         animationName.textContent = "Animation: none";
       }
