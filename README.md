@@ -78,10 +78,10 @@ npx serve .
 
 | セクション | 使用 variant | 使用 tone |
 |---|---|---|
-| intro | slide / slash / echo / glitch | cyan / white |
-| amelo | slide / slash / echo / glitch | cyan / white |
-| bmelo | vertical / slash / echo | cyan / white |
-| chorus | burst / glitch / slide | hot / warm / white |
+| intro | burst / slide / slash | cyan / white |
+| amelo | slide / slash / echo | cyan / white |
+| bmelo | vertical / slash / glitch | cyan / white |
+| chorus | burst / slide / glitch | hot / warm / white |
 | interlude | echo / slash / vertical | cyan / warm |
 | finale | burst / slide / glitch | warm / white / hot |
 
@@ -96,11 +96,13 @@ npx serve .
 
 #### フレーズ内の構造
 
-- **文字を1つずつ `<span>` 化**し、`--i` インデックス × 31ms のディレイで1文字ずつポップイン
-- **キーワード強調**：フレーズ内で最も文字数の多い単語（2文字以上の意味のある語）を "核" とし、その文字だけ `scale: 1.2` + RGBずらしグロー、それ以外は `opacity: 0.6 / scale: 0.9` に抑える
-- **サビ（is-chorus）のキーワード**：声量（CSS変数 `--pv-vocal`）に合わせてリアルタイムで脈動（`scale: 1.18 + vocal × 0.24`）
+- **文字を1つずつ `<span>` 化**し、単語ごとに `<span>` をグループ化（カラオケ同期用）
+- **カラオケ式ハイライト（`is-karaoke`）**：歌詞データ（words）が取れたフレーズは、未発声の文字を淡く（`opacity: 0.26`）落とし、`onWord` が発火するたびにその単語の文字を点灯（`is-sung`）。いま歌われている単語（`is-singing`）は拡大＋強グローで強調される
+- **声量脈動**：サビで歌われている単語は声量（CSS変数 `--pv-vocal`）に合わせて脈動（`scale: 1.16 + vocal × 0.3`）
+- **キーワード強調**：フレーズ内で最も文字数の多い意味のある語を "核" とし、常にアクセントカラー＋RGBずらしグローを付与
 - **カットライン**：フレーズ登場と同時に斜めラインが3本フラッシュ
 - **マスクスイープ**：`clip-path` が左→右に 0.62秒で開いてワイプ登場
+- **保険**：words が取れない曲・区間や、単語イベントが約1.6秒途切れた場合は残り文字を一括点灯（淡いまま消えない）
 
 #### フォントサイズ（文字数による自動切り替え）
 
@@ -112,21 +114,20 @@ npx serve .
 
 #### 同時表示数
 
-最大 **3フレーズ**。超えると古いものからフェードアウト退場。
+最大 **2フレーズ**。超えると古いものからフェードアウト退場。表示時間はフレーズ長 + 1秒の余韻。
 
 ---
 
-### 単語（`onWord`）— ワードヒット
+### 単語（`onWord`）— カラオケ同期
 
-単語タイミングで画面の固定レーン（6箇所）に **白抜きバッジ** が 0.72秒間ポップアップします。  
-レーンは直前と被らないようランダム選択。最大 **7個**同時表示。
+単語タイミングで、表示中フレーズ内の対応する文字を順に点灯させます（上記「カラオケ式ハイライト」）。
+独立したバッジ表示は行いません。
 
 ---
 
-### 文字（`onChar`）— キャラクタティック
+### 文字（`onChar`）
 
-1〜2文字の文字タイミングで **黄色の小さい正方形バッジ**（枠線あり）が8か所の固定ドット位置に 0.42秒間出現します。  
-最大 **12個**同時表示。
+文字単位の独立演出は廃止し、単語ハイライトに統合しています（`onChar` は no-op）。
 
 ---
 

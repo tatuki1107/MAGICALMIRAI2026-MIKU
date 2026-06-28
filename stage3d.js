@@ -65,6 +65,7 @@ let beatPulse = 0;
 let previousBeat = -1;
 let lastPhraseIndex = 0;
 let previousPlaying = false;
+let introTriggered = false;
 let outroTriggered = false;
 let lastSceneCueId = null;
 
@@ -170,6 +171,7 @@ scene.add(shooting.points);
 scene.add(shooting.lines);
 
 const OPENING_SHOT = { label: "Opening / Front", az: 0, orbit: 0, el0: 8, el1: 10, radius0: 5.8, radius1: 5.6, y: 1.22, fov: 40 };
+const INTRO_SHOT   = { label: "Intro / Fly in",   az: 180, orbit: -180, el0: 32, el1: 10, radius0: 80.0, radius1: 5.8, y: 1.22, fov: 42 };
 const OUTRO_SHOT   = { label: "Outro / Pull back", az: 0, orbit: 120, el0: 10, el1: 32, radius0: 5.8, radius1: 48.0, y: 1.22, fov: 58 };
 
 const SHOTS = [
@@ -177,11 +179,11 @@ const SHOTS = [
   { label: "Shot 02 / Close face arc", az: 28, orbit: -32, el0: 12, el1: 18, radius0: 3.45, radius1: 3.0, y: 1.48, fov: 31 },
   { label: "Shot 03 / Left runway", az: -82, orbit: 48, el0: 4, el1: 9, radius0: 5.4, radius1: 4.9, y: 1.12, x: -0.18, fov: 38 },
   { label: "Shot 04 / High sweep", az: 142, orbit: 76, el0: 34, el1: 48, radius0: 7.2, radius1: 6.2, y: 1.18, fov: 48 },
-  { label: "Shot 05 / Low chase", az: 212, orbit: -64, el0: -7, el1: 3, radius0: 5.8, radius1: 4.6, y: 0.9, fov: 46 },
+  { label: "Shot 05 / Low front", az: 22, orbit: -30, el0: -8, el1: 2, radius0: 5.2, radius1: 4.2, y: 0.9, fov: 46 },
   { label: "Shot 06 / Back halo", az: 176, orbit: 42, el0: 10, el1: 22, radius0: 4.8, radius1: 4.2, y: 1.28, fov: 36 },
-  { label: "Shot 07 / Wide orbit", az: 250, orbit: 112, el0: 7, el1: 12, radius0: 8.0, radius1: 6.8, y: 1.12, fov: 50 },
+  { label: "Shot 07 / Wide front", az: -28, orbit: 62, el0: 7, el1: 13, radius0: 7.8, radius1: 6.6, y: 1.12, fov: 50 },
   { label: "Shot 08 / Side close", az: 84, orbit: -44, el0: 8, el1: 15, radius0: 3.8, radius1: 3.3, y: 1.36, x: 0.18, fov: 33 },
-  { label: "Shot 09 / Spiral drop", az: -132, orbit: 94, el0: 42, el1: 8, radius0: 6.5, radius1: 5.0, y: 1.15, fov: 42 },
+  { label: "Shot 09 / Front drop", az: 18, orbit: -52, el0: 40, el1: 9, radius0: 6.2, radius1: 4.8, y: 1.15, fov: 42 },
   { label: "Shot 10 / Long chase", az: 322, orbit: 68, el0: 3, el1: 10, radius0: 9.0, radius1: 7.2, y: 1.05, x: -0.28, fov: 52 },
 ];
 
@@ -214,9 +216,9 @@ const SCENE_CUES = [
     label: "S4 High angle",
     az: 150, orbit:  60, el0: 38, el1: 50, radius0: 6.0, radius1: 5.2, y: 1.18, fov: 46, dur: 1800 },
   // S5: 調律されてる鼓動？→ 急接近（覚醒の境界線）
-  { id: "S5",  startMs: 12450, endMs: 13400,
-    label: "S5 Zoom in",
-    az:   8, orbit:  12, el0: 14, el1: 18, radius0: 1.7, radius1: 1.5, y: 1.62, fov: 20, dur: 600 },
+  // { id: "S5",  startMs: 12450, endMs: 13400,
+  //   label: "S5 Zoom in",
+  //   az:   8, orbit:  12, el0: 14, el1: 18, radius0: 1.7, radius1: 1.5, y: 1.62, fov: 20, dur: 600 },
   // S6: くだらない言葉吹き飛ばす → 横移動・躍動感
   { id: "S6",  startMs: 13400, endMs: 15200,
     label: "S6 Side slide",
@@ -453,7 +455,11 @@ function onPhrase(phrase) {
   const index = Math.max(1, Number(phrase.index) || lastPhraseIndex + 1);
   lastPhraseIndex = index;
 
-  const shot = SHOTS[(index - 1) % SHOTS.length];
+  let shot = SHOTS[(index - 1) % SHOTS.length];
+  // フィナーレ中にアングル4が来た場合はアングル10に変更（Bサビ後の余韻対策）
+  if (sectionId === "finale" && shot === SHOTS[3]) {
+    shot = SHOTS[9];
+  }
   activeShot = {
     ...shot,
     startedAt: performance.now(),
@@ -476,6 +482,7 @@ function reset() {
     from: { ...cam },
   };
   previousPlaying = false;
+  introTriggered = false;
   outroTriggered = false;
   lastSceneCueId = null;
   phrasePulse = 0;
@@ -497,6 +504,24 @@ function tick(now) {
 
   const dt = Math.min(clock.getDelta(), 0.05);
   const playing = !!state.isPlaying;
+
+  // 再生開始 → イントロカメラ（遠くからステージへ飛び込む）
+  if (!previousPlaying && playing && !introTriggered) {
+    introTriggered = true;
+    cam.radius = INTRO_SHOT.radius0;
+    cam.el     = INTRO_SHOT.el0;
+    cam.az     = INTRO_SHOT.az;
+    cam.y      = INTRO_SHOT.y;
+    cam.x      = 0;
+    cam.fov    = INTRO_SHOT.fov;
+    activeShot = {
+      ...INTRO_SHOT,
+      startedAt: performance.now(),
+      duration: 5000,
+      from: { ...cam },
+    };
+    shotName.textContent = INTRO_SHOT.label;
+  }
 
   // 再生終了 → アウトロカメラ（正面からゆっくり引いていく）
   if (previousPlaying && !playing && !outroTriggered && lastPhraseIndex > 0) {
@@ -677,6 +702,7 @@ function onSection(section) {
     ringPulse = 1;
     shotName.textContent = impact.label;
   }
+
 }
 
 // ── 表情モーフ (D-3) ──────────────────────────────────────────

@@ -4,7 +4,7 @@
   const layer = document.getElementById("typography-layer");
   const activePhrases = [];
   const timers = new Set();
-  const MAX_PHRASES = 1;
+  const MAX_PHRASES = 2;
   const SPLIT_THRESHOLD = 9;
   const VERTICAL_SPLIT_THRESHOLD = 8;
   const PARTICLES = new Set([
@@ -105,7 +105,8 @@
 
     trimActivePhrases();
 
-    schedule(() => removePhrase(entry), duration);
+    // 余韻を持たせて消す (唐突に消えると読めない)
+    schedule(() => removePhrase(entry), duration + 1000);
   }
 
   function onWord(_word) {
@@ -158,7 +159,6 @@
     layer.appendChild(canvas);
     const ctx = canvas.getContext("2d");
 
-    // offscreen でテキストをラスタライズ
     const STEP = 4;
     const off = new OffscreenCanvas(W, H);
     const octx = off.getContext("2d");

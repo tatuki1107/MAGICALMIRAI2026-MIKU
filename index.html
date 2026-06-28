@@ -20,7 +20,33 @@
   </head>
   <body>
     <main class="stage-shell">
+      <div id="start-screen" class="start-screen" role="button" tabindex="0" aria-label="タップして開始">
+        <canvas id="start-stars" class="start-stars-canvas" aria-hidden="true"></canvas>
+        <div class="start-inner">
+          <p class="start-label">初音ミク 「マジカルミライ 2026」</p>
+          <h1 class="start-title">TAKEOVER</h1>
+          <p class="start-artist"><span class="start-credit-label">Music by</span>Twinfield</p>
+          <div class="start-cta-wrap">
+            <span id="startCta" class="start-cta">TOUCH TO START</span>
+          </div>
+        </div>
+      </div>
+
       <canvas id="stage-canvas" aria-label="3D model camera stage"></canvas>
+
+      <div id="blackout" class="blackout" hidden></div>
+
+      <div id="replay-screen" class="replay-screen" hidden>
+        <canvas id="replay-stars" class="start-stars-canvas" aria-hidden="true"></canvas>
+        <div class="start-inner">
+          <p class="start-label">初音ミク 「マジカルミライ 2026」</p>
+          <h2 class="start-title">TAKEOVER</h2>
+          <p class="start-artist"><span class="start-credit-label">Music by</span>Twinfield</p>
+          <div class="start-cta-wrap">
+            <button id="replayBtn" class="replay-cta" type="button">&#9654; もう一度再生</button>
+          </div>
+        </div>
+      </div>
       <div id="typography-layer" class="typography-layer" aria-hidden="true"></div>
 
       <header class="stage-hud">
@@ -31,7 +57,6 @@
             <span id="artistName">Twinfield</span>
           </div>
         </div>
-        <div class="status-pill" id="status">Initializing</div>
       </header>
 
       <aside class="shot-panel" aria-label="current camera and phrase">
@@ -39,12 +64,9 @@
         <span id="animationName">Animation loading</span>
       </aside>
 
-      <div class="beat-meter" aria-hidden="true">
-        <div id="beatBar"></div>
-      </div>
 
 
-      <footer class="controls-overlay" id="controlPanel" aria-label="playback controls">
+      <footer class="controls-overlay" id="controlPanel" aria-label="playback controls" hidden>
         <div class="transport">
           <button type="button" id="play" aria-label="Play" title="Play" disabled>&#9654;</button>
           <button type="button" id="pause" aria-label="Pause" title="Pause" disabled>II</button>
