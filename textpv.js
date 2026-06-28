@@ -296,8 +296,8 @@
     phrase.style.setProperty("--pv-angle", `${-12 + (index % 5) * 6}deg`);
     phrase.style.setProperty("--pv-seed", String(index % 9));
     // 同じ variant でも着地点を散らして反復感を消す (translate は transform と別プロパティ)
-    phrase.style.setProperty("--pv-ox", `${jitter(seed, 11) * 4.2}vw`);
-    phrase.style.setProperty("--pv-oy", `${jitter(seed, 7) * 3.4}vh`);
+    phrase.style.setProperty("--pv-ox", `${jitter(seed, 11) * 2.2}vw`);
+    phrase.style.setProperty("--pv-oy", `${jitter(seed, 7) * 2.0}vh`);
 
     const mask = document.createElement("div");
     mask.className = "pv-mask";
