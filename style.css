@@ -94,9 +94,7 @@ input {
   filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.46));
   animation: pvPhraseHold var(--pv-duration, 3200ms) linear both;
   translate: var(--pv-ox, 0) var(--pv-oy, 0);
-  /* 画面外への溢れ防止 */
   max-width: min(94vw, 94%);
-  overflow: clip;
 }
 
 .pv-phrase.is-exiting {
@@ -275,9 +273,9 @@ input {
 }
 
 .pv-vibrate {
-  right: 8%;
+  right: 18%;
   top: 48%;
-  max-width: min(52rem, 82vw);
+  max-width: min(52rem, 76vw);
   transform: translateY(-50%);
 }
 
@@ -343,7 +341,7 @@ input {
 }
 
 .pv-vertical {
-  right: 5%;
+  right: 12%;
   top: 2%;
   transform: translateY(-14px);
   translate: calc(var(--pv-ox, 0) * -1) var(--pv-oy, 0);
@@ -396,9 +394,9 @@ input {
 }
 
 .pv-slash {
-  right: 8%;
+  right: 18%;
   top: 46%;
-  max-width: min(50rem, 82vw);
+  max-width: min(50rem, 76vw);
   transform: translateY(-50%) rotate(var(--pv-angle, -8deg));
   translate: calc(var(--pv-ox, 0) * -1) var(--pv-oy, 0);
 }
@@ -605,7 +603,7 @@ input {
     clip-path: inset(0 100% 0 0);
   }
   to {
-    clip-path: inset(0 0 0 0);
+    clip-path: none;
   }
 }
 
@@ -1137,8 +1135,8 @@ button:disabled {
   }
 
   .pv-vibrate {
-    right: 7%;
-    max-width: min(50rem, 84vw);
+    right: 14%;
+    max-width: min(50rem, 78vw);
   }
 
   .pv-vertical .pv-text {
@@ -1147,8 +1145,8 @@ button:disabled {
   }
 
   .pv-slash {
-    right: 7%;
-    max-width: min(48rem, 84vw);
+    right: 14%;
+    max-width: min(48rem, 78vw);
   }
 
   .pv-glitch {
@@ -1186,12 +1184,12 @@ button:disabled {
   }
 
   .pv-vibrate {
-    right: 3%;
-    max-width: 92vw;
+    right: 6%;
+    max-width: 88vw;
   }
 
   .pv-vertical {
-    right: 3%;
+    right: 6%;
     top: 3%;
   }
 
@@ -1201,8 +1199,8 @@ button:disabled {
   }
 
   .pv-slash {
-    right: 2%;
-    max-width: 92vw;
+    right: 6%;
+    max-width: 88vw;
   }
 
   .pv-glitch {

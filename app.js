@@ -59,6 +59,8 @@
   const replayBtn = document.getElementById("replayBtn");
   let replayTimer = null;
   let blackoutTimer = null;
+  let ahaEndTime = -1;    // onVideoReady で最後の「Aha」endTime を設定、再生中トリガー後に -1 にリセット
+  let lastAhaEndTime = -1; // 曲データから求めた固定値（stop → play 時の復元用）
 
   // ── 共有状態バス (window.MusicBG) ────────────────────────────
   // 他モジュールはこのオブジェクトを読み取って再生状態・歌詞情報を取得する
@@ -157,15 +159,7 @@
   function bindReplay() {
     if (!replayBtn || !replayScreen) return;
     replayBtn.addEventListener("click", () => {
-      clearTimeout(blackoutTimer);
-      clearTimeout(replayTimer);
-      replayScreen.hidden = true;
-      if (blackout) blackout.hidden = true;
-      player.requestMediaSeek(0);
-      window.setTimeout(() => {
-        unlockMediaElement();
-        player.requestPlay();
-      }, 80);
+      location.reload();
     });
   }
 
@@ -252,6 +246,11 @@
     event?.preventDefault?.();
 
     if (!player.video) return;
+
+    if (reachedEnd || endSequenceActive) {
+      location.reload();
+      return;
+    }
 
     unlockMediaElement();
     const accepted = player.requestPlay();
@@ -349,6 +348,18 @@
     choruses = (safe(() => player.getChoruses()) || []).slice().sort((a, b) => a.startTime - b.startTime);
     firstPhraseTime = video.firstPhrase ? video.firstPhrase.startTime : -1;
 
+    // 最後のサビ以降で「Aha」にマッチするフレーズの endTime を固定記録
+    const lastChorus = choruses.length ? choruses[choruses.length - 1] : null;
+    let p = video.firstPhrase;
+    lastAhaEndTime = -1;
+    while (p) {
+      if (/aha/i.test(p.text || "") && (!lastChorus || p.startTime >= lastChorus.startTime)) {
+        lastAhaEndTime = p.endTime;
+      }
+      p = p.next;
+    }
+    ahaEndTime = lastAhaEndTime;
+
     const song = player.data && player.data.song;
     elements.songTitle.textContent = song && song.name ? song.name : "TAKEOVER";
     elements.artistName.textContent = song && song.artist && song.artist.name ? song.artist.name : "Twinfield";
@@ -392,21 +403,20 @@
       endSequenceActive = true;
       clearTimeout(blackoutTimer);
       clearTimeout(replayTimer);
-      // アウトロカメラ(8秒)の完了に合わせたタイミング
       blackoutTimer = window.setTimeout(() => {
         if (!blackout) return;
         blackout.style.animation = "none";
         void blackout.offsetWidth;
         blackout.style.animation = "";
         blackout.hidden = false;
-      }, 6000);
+      }, 1000);
       replayTimer = window.setTimeout(() => {
         if (!replayScreen) return;
         replayScreen.style.animation = "none";
         void replayScreen.offsetWidth;
         replayScreen.style.animation = "";
         replayScreen.hidden = false;
-      }, 9000);
+      }, 2500);
     }
   }
 
@@ -430,21 +440,20 @@
       clearTimeout(replayTimer);
     }
     if (shouldShowReplay && !wasEndSequenceActive) {
-      // アウトロカメラ(8秒)の完了に合わせたタイミング
       blackoutTimer = window.setTimeout(() => {
         if (!blackout) return;
         blackout.style.animation = "none";
         void blackout.offsetWidth;
         blackout.style.animation = "";
         blackout.hidden = false;
-      }, 6000);
+      }, 1000);
       replayTimer = window.setTimeout(() => {
         if (!replayScreen) return;
         replayScreen.style.animation = "none";
         void replayScreen.offsetWidth;
         replayScreen.style.animation = "";
         replayScreen.hidden = false;
-      }, 9000);
+      }, 2500);
     }
   }
 
@@ -452,6 +461,10 @@
     state.position = position;
     if (duration > 0 && position >= duration - 2000) {
       reachedEnd = true;
+    }
+    if (ahaEndTime > 0 && position >= ahaEndTime) {
+      window.ModelStage?.startOutroFade?.();
+      ahaEndTime = -1;
     }
     updatePosition(position);
     updateBeat(position);
@@ -584,6 +597,7 @@
       { ...state.phrase, isChorus: state.isChorus, words: collectWords(unit) },
       now,
     );
+
   }
 
   // フレーズを構成する単語テキストを順に取り出す (キーワード強調用)
@@ -714,6 +728,7 @@
     committedSectionId = "intro";
     pendingSectionId = "intro";
     pendingSectionSince = 0;
+    ahaEndTime = lastAhaEndTime; // 曲データから求めた固定値を復元（stop→play 対応）
     window.ModelStage?.reset?.();
     window.TextPV?.reset?.();
   }

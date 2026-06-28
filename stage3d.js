@@ -383,6 +383,8 @@ window.ModelStage = {
   onSection,
   /** 再生リセット時に全状態を初期値へ戻す */
   reset,
+  /** Aha 終了と同時にフェードアウトを即起動する (遅延なし) */
+  startOutroFade,
   /** テキストをステージ背景にタイプライター表示し、dissolve 関数を返す */
   spawnParticle(text, color) {
     activeParticle?.dissolve?.();
@@ -547,30 +549,10 @@ function tick(now) {
     shotName.textContent = INTRO_SHOT.label;
   }
 
-  // 再生終了 → 最後のアングルからそのまま引いてフェードアウト
-  if (previousPlaying && !playing && !outroTriggered && lastPhraseIndex > 0) {
+  // 再生終了 → startOutroFade() 未呼出の場合はここでフォールバック
+  if (previousPlaying && !playing && lastPhraseIndex > 0 && !outroTriggered) {
     outroTriggered = true;
-    outroFadeStartTime = now + OUTRO_FADE_DELAY;
-    const outroLabel = "Outro / Pull back";
-    const outroShot = {
-      label: outroLabel,
-      az: cam.az,
-      orbit: 25,
-      el0: cam.el,
-      el1: Math.min(cam.el + 20, 50),
-      radius0: cam.radius,
-      radius1: 52,
-      x: cam.x,
-      y: cam.y,
-      fov: cam.fov + 12,
-    };
-    activeShot = {
-      ...outroShot,
-      startedAt: performance.now(),
-      duration: 8000,
-      from: { ...cam },
-    };
-    shotName.textContent = outroLabel;
+    if (outroFadeStartTime < 0) outroFadeStartTime = now + OUTRO_FADE_DELAY;
   }
 
   // フェードアウト
@@ -737,6 +719,13 @@ function updateScene(dt) {
   updateShootingStars(dt);
   updateSpotlights(dt, beat, chorus, vocal);
 }
+
+function startOutroFade() {
+  if (outroFadeStartTime > 0) return;
+  outroTriggered = true;
+  outroFadeStartTime = performance.now();
+}
+
 
 function onSection(section) {
   sectionId = section?.id || "intro";
