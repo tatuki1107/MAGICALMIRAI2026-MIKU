@@ -1,6 +1,16 @@
+/**
+ * textpv.js — 歌詞テキスト PV エンジン
+ * フレーズ・単語・文字イベントを受け取り、セクションごとの variant / tone で
+ * DOM アニメーション演出を生成する。
+ * window.TextPV を公開し、app.js からイベントを受け取る。
+ *
+ * variant 一覧: typewriter / pixel / polygon / particle / slide /
+ *               slash / echo / glitch / burst / vibrate / vertical
+ */
 (() => {
   "use strict";
 
+  // ── DOM / 定数 ────────────────────────────────────────────
   const layer = document.getElementById("typography-layer");
   const activePhrases = [];
   const timers = new Set();
@@ -19,7 +29,9 @@
   let wordHitIndex = 0;
   let charTickIndex = 0;
 
-  // ── セクションごとの視覚言語 ──
+  // ── セクションごとの視覚言語 ─────────────────────────────────
+  // variant/tones はフレーズ本文のハッシュ値でセクション内から選択されるため、
+  // 同じフレーズは常に同じ見た目になる。
   // 出てきた順番ではなく「曲のどこか」で見た目が決まるようにする。
   // variants/tones は許容セットで、フレーズ本文のハッシュ+直前回避で選ぶ。
   const SECTION_STYLE = {
@@ -47,11 +59,17 @@
 
   let vocalRaf = 0;
 
+  // ── 公開 API (window.TextPV) ──────────────────────────────
   window.TextPV = {
+    /** フレーズ開始時に演出要素を生成する */
     onPhrase,
+    /** 単語タイミング (現在は no-op) */
     onWord,
+    /** 文字タイミング (現在は no-op) */
     onChar,
+    /** セクション変化時 (現在は no-op) */
     onSection,
+    /** 再生リセット時に全演出要素と状態を初期化する */
     reset,
   };
 
@@ -278,6 +296,7 @@
     layer.replaceChildren();
   }
 
+  // ── DOM 構築 ──────────────────────────────────────────────
   function buildPhraseElement(config) {
     const { text, words, index, variant, tone, duration, isChorus, seed } = config;
     const phrase = document.createElement("section");
@@ -425,6 +444,7 @@
     }
   }
 
+  // ── フレーズ管理 ──────────────────────────────────────────
   function trimActivePhrases() {
     while (activePhrases.length > MAX_PHRASES) {
       removePhrase(activePhrases[0]);
@@ -468,6 +488,7 @@
     if (!vocalRaf) vocalRaf = window.requestAnimationFrame(pump);
   }
 
+  // ── ユーティリティ ────────────────────────────────────────
   function currentSectionId() {
     return window.MusicBG?.section?.id || "intro";
   }

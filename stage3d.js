@@ -1,3 +1,10 @@
+/**
+ * stage3d.js — 3D メインステージ
+ * GLB モデルを読み込み、TextAlive の拍・フレーズ・セクション情報に同期して
+ * カメラ演出・ライティング・エフェクトを制御する。
+ * app.js からのイベントを受け取る公開 API を window.ModelStage として提供する。
+ */
+
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
@@ -5,12 +12,14 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 
+// ── DOM / 共有状態 ────────────────────────────────────────────
 const canvas = document.getElementById("stage-canvas");
 const shotName = document.getElementById("shotName");
 const animationName = document.getElementById("animationName");
 const statusPill = document.getElementById("status");
 const state = window.MusicBG || {};
 
+// ── レンダラー ────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({
   canvas,
   antialias: true,
@@ -22,6 +31,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
+// ── シーン / カメラ / ライト ──────────────────────────────────
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000308);
 // 星空を遠くまで見せるため霧はごく薄く(奥行き程度)
@@ -56,6 +66,7 @@ const floorGroup = new THREE.Group();
 scene.add(floorGroup);
 buildFloor();
 
+// ── 再生状態 ──────────────────────────────────────────────────
 let mixer = null;
 let modelLoaded = false;
 let modelHeight = 2.4;
@@ -171,6 +182,9 @@ const shooting = buildShootingStars();
 scene.add(shooting.points);
 scene.add(shooting.lines);
 
+// ── カメラショット定義 ────────────────────────────────────────
+// 各ショットは球座標(az/el/radius)と FOV で定義。
+// OPENING/INTRO は特殊用途、SHOTS はフレーズ連動ループ、SCENE_CUES は時刻指定の演出カット。
 const OPENING_SHOT = { label: "Opening / Front", az: 0, orbit: 0, el0: 8, el1: 10, radius0: 5.8, radius1: 5.6, y: 1.22, fov: 40 };
 const INTRO_SHOT   = { label: "Intro / Fly in",   az: 180, orbit: -180, el0: 32, el1: 10, radius0: 80.0, radius1: 5.8, y: 1.22, fov: 42 };
 
@@ -242,7 +256,9 @@ let activeShot = {
 let interludeShotIndex = 0;
 let interludeNextShotAt = 0;
 
-// ── パーティクルテキスト（Step 5） ─────────────────────────────────
+// ── パーティクルテキスト ──────────────────────────────────────
+// spawnBgBoard: DotGothic16 でテキストをタイプライター表示し、dissolve() で流れ出て消える。
+// 歌詞 PV エンジンの particle variant から window.ModelStage.spawnParticle() 経由で呼ばれる。
 let activeParticle = null;
 
 function drawSpacedText(ctx, text, cx, cy, spacing) {
@@ -357,10 +373,17 @@ function spawnBgBoard(text, color) {
   };
 }
 
+// ── 公開 API (window.ModelStage) ─────────────────────────────
+// app.js が onPhrase / onSection / reset を呼び出し、
+// 歌詞 PV エンジンが spawnParticle を呼び出す。
 window.ModelStage = {
+  /** フレーズ開始時にカメラショットを切り替える */
   onPhrase,
+  /** セクション変化時にエネルギー・ショットを更新する */
   onSection,
+  /** 再生リセット時に全状態を初期値へ戻す */
   reset,
+  /** テキストをステージ背景にタイプライター表示し、dissolve 関数を返す */
   spawnParticle(text, color) {
     activeParticle?.dissolve?.();
     activeParticle = { dissolve: spawnBgBoard(text, color) };
@@ -376,6 +399,7 @@ resize();
 window.addEventListener("resize", resize);
 requestAnimationFrame(tick);
 
+// ── モデル読み込み ────────────────────────────────────────────
 function loadModel() {
   setStageStatus("Loading GLB animation");
   const modelUrl = new URL("./3D/素体8test2.glb", import.meta.url).href;
@@ -498,6 +522,7 @@ function reset() {
   shotName.textContent = OPENING_SHOT.label;
 }
 
+// ── メインループ ──────────────────────────────────────────────
 function tick(now) {
   requestAnimationFrame(tick);
 
@@ -776,9 +801,6 @@ function resolveMorph(dict, names) {
 }
 
 function updateMorphs(dt) {
-  if (outroTriggered) {
-    console.log("OUTRO activeShot:", activeShot.label, "az:", cam.az.toFixed(2));
-  }
   if (!morphMesh || !morphMesh.morphTargetInfluences) return;
   const infl = morphMesh.morphTargetInfluences;
   const playing = !!state.isPlaying;
@@ -1102,6 +1124,7 @@ function setStageStatus(message, variant) {
   statusPill.classList.toggle("error", variant === "error");
 }
 
+// ── 数学ユーティリティ ────────────────────────────────────────
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value) || 0));
 }
