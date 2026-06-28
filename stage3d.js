@@ -402,7 +402,7 @@ requestAnimationFrame(tick);
 // ── モデル読み込み ────────────────────────────────────────────
 function loadModel() {
   setStageStatus("Loading GLB animation");
-  const modelUrl = new URL("./3D/素体8test2.glb", import.meta.url).href;
+  const modelUrl = new URL("./3D/素体9.glb", import.meta.url).href;
   new GLTFLoader().load(
     modelUrl,
     (gltf) => {
