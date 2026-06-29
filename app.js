@@ -9,8 +9,20 @@
   // ── 定数 / 設定 ───────────────────────────────────────────
   const APP_TOKEN = "473zGS4UYYBAd2OR";
   const DEFAULT_SONG_URL = "https://piapro.jp/t/E2i3/20251215092113";
+  const PLAYER_VOLUME = 80;
+  const MEDIA_VOLUME = 0.8;
   const REQUIRES_HTTP = window.location.protocol === "file:";
-  const HTTP_REQUIRED_MESSAGE = "Open this project through http://localhost so TextAlive can fetch song data.";
+  const HTTP_REQUIRED_MESSAGE = "HTTPサーバ経由で開いてください";
+  const START_LABEL = {
+    loading: "LOADING...",
+    ready: "TOUCH TO START",
+    retry: "TOUCH AGAIN TO START",
+  };
+  const LOAD_ERROR_LABEL = {
+    textAliveApi: "TEXTALIVE API LOAD ERROR",
+    song: "SONG LOAD FAILED",
+    stage: "3D LOAD FAILED",
+  };
 
   // ── セクション構成 (①〜⑤) ──
   // amelo=SIGNAL LOST / bmelo=SYSTEM SCAN / chorus=TAKEOVER /
@@ -68,7 +80,7 @@
     return;
   }
 
-  const { Player, Ease } = window.TextAliveApp;
+  const { Player } = window.TextAliveApp;
   // ── TextAlive Player と内部状態 ──────────────────────────────
   let player = createPlayer();
   let duration = 0;
@@ -76,10 +88,22 @@
   let lastPhraseStartTime = -1;
   let lastWordStartTime = -1;
   let lastCharStartTime = -1;
-  let pendingPlay = false;
-  let playbackActive = false;
-  let reachedEnd = false;
-  let endSequenceActive = false;
+  // TextAlive は準備中にも play/pause を発火するため、ユーザー操作由来かを分けて扱う。
+  const playbackState = {
+    waitingForReady: false,
+    timerReady: false,
+    userRequested: false,
+    active: false,
+    reachedEnd: false,
+    endSequenceActive: false,
+    verifyTimer: null,
+  };
+  const startupLoad = {
+    songReady: false,
+    timerReady: false,
+    stageReady: !!window.ModelStage?.isReady?.(),
+    failed: false,
+  };
   let choruses = [];
   let firstPhraseTime = -1;
   let committedSectionId = "intro";
@@ -89,6 +113,7 @@
   // ── 初期化 ────────────────────────────────────────────────
   bindStartScreen();
   bindReplay();
+  bindStageLoadEvents();
   initStartStars();
   initReplayStars();
 
@@ -122,17 +147,7 @@
     if (!startScreen) return;
 
     const activate = () => {
-      unlockMediaElement();
-      if (player.video) {
-        player.requestPlay();
-        dismissStartScreen();
-      } else {
-        pendingPlay = true;
-        if (startCta) {
-          startCta.textContent = "LOADING...";
-          startCta.classList.add("is-loading");
-        }
-      }
+      requestStartFromUserGesture();
     };
 
     startScreen.addEventListener("click", activate);
@@ -146,6 +161,25 @@
     replayBtn.addEventListener("click", () => {
       location.reload();
     });
+  }
+
+  function bindStageLoadEvents() {
+    if (window.ModelStage?.isReady?.()) {
+      startupLoad.stageReady = true;
+    }
+    if (window.ModelStage?.getLoadError?.()) {
+      markStartupFailed(LOAD_ERROR_LABEL.stage);
+    }
+
+    window.addEventListener("modelstage:ready", () => {
+      startupLoad.stageReady = true;
+      updateStartCtaForLoadState();
+    });
+    window.addEventListener("modelstage:error", () => {
+      markStartupFailed(LOAD_ERROR_LABEL.stage);
+    });
+
+    updateStartCtaForLoadState();
   }
 
   function drawStarsToCanvas(canvas) {
@@ -185,33 +219,48 @@
     window.setTimeout(() => { startScreen.hidden = true; }, 750);
   }
 
-  function unlockMediaElement() {
-    const media = elements.media.querySelector("audio, video");
-    if (!media || !media.paused) return;
+  function requestStartFromUserGesture() {
+    if (!isPlaybackReady()) {
+      playbackState.waitingForReady = true;
+      setStatus("Loading TextAlive song data");
+      return;
+    }
 
-    const wasMuted = media.muted;
-    media.muted = true;
+    startPlaybackFromUserGesture();
+  }
+
+  function isPlaybackReady() {
+    return !!player.video && areStartupAssetsReady();
+  }
+
+  function startPlaybackFromUserGesture() {
+    playbackState.waitingForReady = false;
+    playbackState.userRequested = true;
+    applyVolume();
+
+    const media = currentMedia();
+    const startTime = media ? media.currentTime : 0;
 
     try {
-      const playPromise = media.play();
-      if (playPromise && typeof playPromise.catch === "function") {
-        playPromise
-          .then(() => {
-            window.setTimeout(() => {
-              media.muted = wasMuted;
-            }, 80);
-          })
-          .catch(() => {
-            media.muted = wasMuted;
-          });
-      } else {
-        window.setTimeout(() => {
-          media.muted = wasMuted;
-        }, 80);
-      }
-    } catch (_error) {
-      media.muted = wasMuted;
-      // TextAlive will report playback readiness through its own listener.
+      player.requestPlay();
+    } catch (error) {
+      addEvent(`requestPlay failed: ${error && error.message ? error.message : String(error)}`);
+    }
+
+    requestMediaPlay(media);
+
+    verifyPlaybackStarted(startTime);
+  }
+
+  function requestMediaPlay(media) {
+    if (!media) return;
+
+    const playPromise = media.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch((error) => {
+        addEvent(`media play failed: ${error && error.message ? error.message : String(error)}`);
+        promptStartAgain();
+      });
     }
   }
 
@@ -220,10 +269,10 @@
     const mode = app.managed ? "Connected to TextAlive host" : "Standalone mode";
     setStatus(mode, "ready");
     addEvent(`app ready: ${mode}`);
-    player.volume = 8;
+    applyVolume();
 
     if (REQUIRES_HTTP) {
-      setStatus(HTTP_REQUIRED_MESSAGE, "error");
+      markStartupFailed(HTTP_REQUIRED_MESSAGE);
       addEvent("file origin blocked");
       return;
     }
@@ -241,7 +290,7 @@
 
   function loadSong(songUrl) {
     if (!songUrl) {
-      setStatus("Song URL is missing.", "error");
+      markStartupFailed("SONG URL MISSING");
       return;
     }
 
@@ -250,13 +299,15 @@
 
     player.createFromSongUrl(songUrl).catch((error) => {
       const message = error && error.message ? error.message : String(error);
-      setStatus("Song data load failed", "error");
+      markStartupFailed(LOAD_ERROR_LABEL.song);
       addEvent(message);
     });
   }
 
   function onVideoReady(video) {
+    startupLoad.songReady = true;
     duration = Math.max(0, Math.ceil(video.duration || video.endTime || 0));
+    applyVolume();
     elements.phraseCount.textContent = `phrases ${video.phraseCount || 0}`;
     elements.wordCount.textContent = `words ${video.wordCount || 0}`;
     elements.charCount.textContent = `chars ${video.charCount || 0}`;
@@ -281,64 +332,65 @@
     }
     ahaEndTime = lastAhaEndTime;
 
-    setStatus("Song ready", "ready");
+    updateStartCtaForLoadState();
     addEvent("video ready");
   }
 
   function onTimerReady() {
-    setStatus("Playback ready", "ready");
-    addEvent("timer ready");
-    if (pendingPlay) {
-      pendingPlay = false;
-      player.requestPlay();
-      dismissStartScreen();
+    playbackState.timerReady = true;
+    startupLoad.timerReady = true;
+    applyVolume();
+    if (playbackState.waitingForReady && areStartupAssetsReady()) {
+      playbackState.waitingForReady = false;
+      promptStartAgain();
+    } else {
+      updateStartCtaForLoadState();
     }
+    addEvent("timer ready");
   }
 
   function onPlay() {
-    playbackActive = true;
-    reachedEnd = false;
-    endSequenceActive = false;
+    applyVolume();
+    if (ignoreInternalPlaybackEvent("play")) {
+      return;
+    }
+    playbackState.active = true;
+    playbackState.reachedEnd = false;
+    playbackState.endSequenceActive = false;
     state.isPlaying = true;
     addEvent("play");
     clearTimeout(blackoutTimer);
     clearTimeout(replayTimer);
     if (blackout) blackout.hidden = true;
     if (replayScreen) replayScreen.hidden = true;
+    dismissStartScreen();
   }
 
   function onPause() {
-    const shouldShowReplay = playbackActive && reachedEnd;
+    if (ignoreInternalPlaybackEvent("pause")) {
+      return;
+    }
+    const shouldShowReplay = playbackState.active && playbackState.reachedEnd;
     state.isPlaying = false;
     if (!shouldShowReplay) setStatus("Paused", "info");
     addEvent("pause");
     // TextAlive は曲の自然終了時に onStop ではなく onPause を呼ぶ場合がある
     if (shouldShowReplay) {
-      endSequenceActive = true;
-      clearTimeout(blackoutTimer);
-      clearTimeout(replayTimer);
-      blackoutTimer = window.setTimeout(() => {
-        if (!blackout) return;
-        blackout.style.animation = "none";
-        void blackout.offsetWidth;
-        blackout.style.animation = "";
-        blackout.hidden = false;
-      }, 1000);
-      replayTimer = window.setTimeout(() => {
-        if (!replayScreen) return;
-        replayScreen.style.animation = "none";
-        void replayScreen.offsetWidth;
-        replayScreen.style.animation = "";
-        replayScreen.hidden = false;
-      }, 2500);
+      playbackState.endSequenceActive = true;
+      scheduleReplaySequence();
     }
   }
 
   function onStop() {
+    if (!playbackState.active && !playbackState.userRequested) {
+      addEvent("internal stop ignored");
+      return;
+    }
     const nearEnd = duration > 0 && state.position >= duration * 0.88;
-    const shouldShowReplay = playbackActive && (reachedEnd || nearEnd);
-    playbackActive = false;
-    reachedEnd = false;
+    const shouldShowReplay = playbackState.active && (playbackState.reachedEnd || nearEnd);
+    playbackState.active = false;
+    playbackState.userRequested = false;
+    playbackState.reachedEnd = false;
     state.isPlaying = false;
     if (!shouldShowReplay) setStatus("Stopped", "info");
     addEvent("stop");
@@ -347,34 +399,21 @@
     resetLiveState();
 
     // onPause でリプレイシーケンス開始済みの場合はタイマーを維持する
-    const wasEndSequenceActive = endSequenceActive;
-    endSequenceActive = false;
+    const wasEndSequenceActive = playbackState.endSequenceActive;
+    playbackState.endSequenceActive = false;
     if (!wasEndSequenceActive) {
       clearTimeout(blackoutTimer);
       clearTimeout(replayTimer);
     }
     if (shouldShowReplay && !wasEndSequenceActive) {
-      blackoutTimer = window.setTimeout(() => {
-        if (!blackout) return;
-        blackout.style.animation = "none";
-        void blackout.offsetWidth;
-        blackout.style.animation = "";
-        blackout.hidden = false;
-      }, 1000);
-      replayTimer = window.setTimeout(() => {
-        if (!replayScreen) return;
-        replayScreen.style.animation = "none";
-        void replayScreen.offsetWidth;
-        replayScreen.style.animation = "";
-        replayScreen.hidden = false;
-      }, 2500);
+      scheduleReplaySequence();
     }
   }
 
   function onTimeUpdate(position) {
     state.position = position;
     if (duration > 0 && position >= duration - 2000) {
-      reachedEnd = true;
+      playbackState.reachedEnd = true;
     }
     if (ahaEndTime > 0 && position >= ahaEndTime) {
       window.ModelStage?.startOutroFade?.();
@@ -586,7 +625,6 @@
     }
 
     const progress = clamp01(beat.progress(position));
-    const easedProgress = Ease ? Ease.circIn(progress) : progress;
     state.beatIndex = beat.index;
     state.beatProgress = progress;
     elements.beat.textContent = `#${beat.index} ${Math.round(progress * 100)}%`;
@@ -607,6 +645,9 @@
     lastPhraseStartTime = -1;
     lastWordStartTime = -1;
     lastCharStartTime = -1;
+    startupLoad.songReady = false;
+    startupLoad.timerReady = false;
+    resetPlaybackState();
     elements.phraseCount.textContent = "phrases -";
     elements.wordCount.textContent = "words -";
     elements.charCount.textContent = "chars -";
@@ -622,6 +663,7 @@
     state.beatProgress = 0;
     state.beatIndex = -1;
     state.isChorus = false;
+    playbackState.userRequested = false;
     state.phraseIndex = 0;
     state.phrase = { index: 0, text: "", startTime: -1, endTime: -1, progress: 0 };
     state.lyric.active = false;
@@ -639,7 +681,122 @@
   }
 
   // ── UI / ユーティリティ ───────────────────────────────────────
-  function setStatus(_message, _variant = "info", _options = {}) {}
+  function setStatus(message, variant = "info", _options = {}) {
+    if (!startCta) return;
+
+    if (variant === "error") {
+      markStartupFailed(message);
+      return;
+    }
+
+    if (/loading/i.test(message)) {
+      setStartCta(START_LABEL.loading, "loading");
+      return;
+    }
+
+    if (variant === "ready" && /song ready|playback ready/i.test(message)) {
+      updateStartCtaForLoadState();
+    }
+  }
+
+  function updateStartCtaForLoadState() {
+    if (startupLoad.failed || !startCta) return;
+
+    if (!areStartupAssetsReady()) {
+      setStartCta(START_LABEL.loading, "loading");
+      return;
+    }
+
+    setStartCta(playbackState.waitingForReady ? START_LABEL.retry : START_LABEL.ready, "ready");
+  }
+
+  function areStartupAssetsReady() {
+    return startupLoad.songReady && startupLoad.timerReady && startupLoad.stageReady;
+  }
+
+  function markStartupFailed(message) {
+    startupLoad.failed = true;
+    setStartCta(message, "error");
+  }
+
+  function setStartCta(message, stateName = "") {
+    if (!startCta) return;
+    startCta.textContent = message;
+    startCta.classList.toggle("is-loading", stateName === "loading");
+    startCta.classList.toggle("is-error", stateName === "error");
+    startCta.classList.toggle("is-ready", stateName === "ready");
+  }
+
+  function applyVolume() {
+    player.volume = PLAYER_VOLUME;
+    const media = currentMedia();
+    if (media) {
+      media.muted = false;
+      media.volume = MEDIA_VOLUME;
+    }
+  }
+
+  function currentMedia() {
+    return elements.media?.querySelector?.("audio, video") || null;
+  }
+
+  function showStartScreen() {
+    if (!startScreen) return;
+    startScreen.hidden = false;
+    startScreen.classList.remove("is-dismissed");
+  }
+
+  function promptStartAgain() {
+    showStartScreen();
+    setStartCta(START_LABEL.retry, "ready");
+  }
+
+  function ignoreInternalPlaybackEvent(eventName) {
+    const shouldIgnore = !playbackState.userRequested || (!playbackState.active && eventName !== "play");
+    if (shouldIgnore) {
+      addEvent(`internal ${eventName} ignored`);
+    }
+    return shouldIgnore;
+  }
+
+  function verifyPlaybackStarted(startTime) {
+    clearTimeout(playbackState.verifyTimer);
+    playbackState.verifyTimer = window.setTimeout(() => {
+      const media = currentMedia();
+      const advanced = media && !media.paused && media.currentTime > startTime + 0.25;
+      if (advanced) return;
+
+      state.isPlaying = false;
+      promptStartAgain();
+      addEvent("playback did not advance");
+    }, 1600);
+  }
+
+  function resetPlaybackState() {
+    clearTimeout(playbackState.verifyTimer);
+    playbackState.waitingForReady = false;
+    playbackState.timerReady = false;
+    playbackState.userRequested = false;
+    playbackState.active = false;
+    playbackState.reachedEnd = false;
+    playbackState.endSequenceActive = false;
+    playbackState.verifyTimer = null;
+  }
+
+  function scheduleReplaySequence() {
+    clearTimeout(blackoutTimer);
+    clearTimeout(replayTimer);
+    blackoutTimer = window.setTimeout(() => showAnimatedOverlay(blackout), 1000);
+    replayTimer = window.setTimeout(() => showAnimatedOverlay(replayScreen), 2500);
+  }
+
+  function showAnimatedOverlay(element) {
+    if (!element) return;
+    element.style.animation = "none";
+    void element.offsetWidth;
+    element.style.animation = "";
+    element.hidden = false;
+  }
 
   function addEvent(message) {
     if (!elements.events) return;

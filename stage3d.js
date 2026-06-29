@@ -66,6 +66,7 @@ buildFloor();
 // ── 再生状態 ──────────────────────────────────────────────────
 let mixer = null;
 let modelLoaded = false;
+let modelLoadError = null;
 let modelHeight = 2.4;
 let modelCenterY = 1.2;
 let phrasePulse = 0;
@@ -351,6 +352,14 @@ function spawnBgBoard(text, color) {
 // app.js が onPhrase / onSection / reset を呼び出し、
 // 歌詞 PV エンジンが spawnParticle を呼び出す。
 window.ModelStage = {
+  /** GLB モデルの読み込みが完了しているか */
+  isReady() {
+    return modelLoaded;
+  },
+  /** GLB 読み込み失敗時の Error。成功時は null */
+  getLoadError() {
+    return modelLoadError;
+  },
   /** フレーズ開始時にカメラショットを切り替える */
   onPhrase,
   /** セクション変化時にエネルギー・ショットを更新する */
@@ -400,10 +409,13 @@ function loadModel() {
       }
 
       modelLoaded = true;
+      window.dispatchEvent(new CustomEvent("modelstage:ready"));
     },
     undefined,
     (error) => {
+      modelLoadError = error;
       console.error(error);
+      window.dispatchEvent(new CustomEvent("modelstage:error", { detail: error }));
     },
   );
 }
